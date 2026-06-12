@@ -19,14 +19,15 @@ export default function DrawingCanvas() {
     }
 
     const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      // 先更新 store 尺寸（用于 Canvas 外部，如 CoordinateGrid / executeInstructions）
+      setCanvasSize(w, h);
+      // 再更新本地 size 状态
       setSize((prev) => {
-        const w = el.clientWidth;
-        const h = el.clientHeight;
         if (prev.width === w && prev.height === h) {
           return prev;
         }
-        // 同步到 store 方便 executeInstructions 使用
-        setCanvasSize(w, h);
         return { width: w, height: h };
       });
     };
