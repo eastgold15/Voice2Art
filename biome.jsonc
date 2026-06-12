@@ -4,5 +4,13 @@
     "ultracite/biome/react",
     "ultracite/biome/next"
   ],
-  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json"
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "noArrayIndexKey": "off",
+        "noExplicitAny": "off"
+      }
+    }
+  }
 }
