@@ -33,6 +33,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "typeCheck": "bun x tsc --noEmit",
     "check": "ultracite check",
     "fix": "ultracite fix",
     "prepare": "lefthook install"
