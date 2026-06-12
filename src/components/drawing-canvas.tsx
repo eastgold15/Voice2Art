@@ -28,8 +28,6 @@ export default function DrawingCanvas() {
         if (prev.width === w && prev.height === h) {
           return prev;
         }
-        // 同步到 store 方便 executeInstructions 使用
-        setCanvasSize(w, h);
         return { width: w, height: h };
       });
     };
