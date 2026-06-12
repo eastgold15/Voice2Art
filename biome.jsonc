@@ -10,6 +10,9 @@
       "suspicious": {
         "noArrayIndexKey": "off",
         "noExplicitAny": "off"
+      },
+      "style": {
+        "useBlockStatements": "off"
       }
     }
   }
