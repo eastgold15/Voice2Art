@@ -169,24 +169,76 @@ refactor: 提取颜色解析为独立函数
 
 ---
 
-## 六、保护 main 分支（GitHub 设置）
+## 六、保护 main 分支（GitHub Rulesets）
 
-两人都要设置一次。打开 GitHub 仓库：
+> ⚠️ GitHub 新版界面已从旧版 "Branch protection rules" 迁移为 **Rulesets**。以下是新版配置方法。
 
-1. **Settings** → **Branches** → **Add branch protection rule**
-2. **Branch name pattern**：填 `main`
-3. 勾选：
-   ```
-   ☑ Require a pull request before merging
-      ☑ Require approvals (1)
-   ☑ Require status checks to pass before merging
-   ☑ Do not allow bypassing the above settings
-   ```
-4. **Save**
+### 前置条件
 
-设置后 `git push origin main` 会被拒绝，只能通过 PR 合并。
+先把对方加为仓库 Collaborator，否则对方提不了 PR 也 review 不了：
 
-> ⚠️ 记得先把对方加为仓库 Collaborator：Settings → Collaborators → Add people
+```
+Settings → Collaborators → Add people → 输入对方 GitHub ID → Write 权限
+```
+
+### 操作入口
+
+```
+仓库主页 → Settings → Rules → Rulesets → New ruleset
+```
+
+### 关键配置项
+
+#### ① Target branches（⚠️ 最容易漏的一步）
+
+点 **Add target**，选择或输入：
+
+```
+Include default branch (main)
+```
+
+> 不配这个，规则不生效，任何人都能直接 push main。
+
+#### ② Rules — 勾选以下四项
+
+| 勾选 | 选项 | 作用 |
+|:----:|------|------|
+| ☑ | **Restrict updates** | 禁止绕过 PR 直接 push main |
+| ☑ | **Require a pull request before merging** | **核心项** — 所有变更必须通过 PR |
+| ☑ | **Require linear history** | 禁止 merge commit，main 保持直线历史 |
+| ☑ | **Block force pushes** | 防止 `git push --force` 覆盖 main |
+
+#### ③ 展开 "Require a pull request before merging"
+
+```
+Require a pull request before merging  ☑
+  └─ Required approvals:  1         ← 至少 1 人 review 才能合并
+  └─ Dismiss stale approvals:  ☑    ← 新 push 后旧 approval 作废
+  └─ Require review from Code Owners:  ☐  (你们人少不需要)
+```
+
+### 最终效果预览
+
+```
+Ruleset Name : main
+Target branches : main
+
+Rules:
+  ☑ Restrict updates
+  ☑ Require a pull request before merging
+       └─ Required approvals: 1
+  ☑ Require linear history
+  ☑ Block force pushes
+```
+
+### 设置后的行为
+
+| 操作 | 结果 |
+|------|------|
+| `git push origin main` | ❌ 拒绝 |
+| `git push origin feat/a-voice` | ✅ 正常 |
+| GitHub 网页上直接点 Merge 按钮 | ❌ 拒绝（没有 PR） |
+| 创建 PR → 对方 Approve → 点 Squash and merge | ✅ 成功 |
 
 ---
 
