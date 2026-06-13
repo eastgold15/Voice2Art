@@ -292,6 +292,10 @@ export function matchCommand(text: string): RegexResult | null {
     if (match?.[0]) {
       const result = rule.handler(cleaned, match);
 
+      if (!result) {
+        continue;
+      }
+
       // 检查是否有多步指令被截断：
       // 匹配到的文本后面如果还包含"画"关键词 → 让 LLM 处理
       const matchedEnd = (match.index ?? 0) + match[0].length;

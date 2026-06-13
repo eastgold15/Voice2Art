@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Download,
   Grid3X3,
   Minus,
   Paintbrush,
@@ -41,6 +42,7 @@ export default function BottomToolbar() {
     undo,
     redo,
     toggleGrid,
+    exportPng,
   } = useDrawingStore();
 
   const canUndo = historyIndex > 0;
@@ -133,6 +135,15 @@ export default function BottomToolbar() {
           variant="ghost"
         >
           <Redo2 className="size-4" />
+        </Button>
+        <Button
+          aria-label="导出 PNG"
+          disabled={!hasShapes}
+          onClick={exportPng}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Download className="size-4" />
         </Button>
         <Button
           aria-label="清空画布"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Circle, Ellipse, Layer, Line, Rect, Stage } from "react-konva";
 
 import CoordinateGrid from "@/components/layout/coordinate-grid";
@@ -9,8 +9,29 @@ import { useDrawingStore } from "@/store/use-drawing-store";
 export default function DrawingCanvas() {
   const shapes = useDrawingStore((s) => s.shapes);
   const setCanvasSize = useDrawingStore((s) => s.setCanvasSize);
+  const registerExportPng = useDrawingStore((s) => s.registerExportPng);
   const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<any>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+
+  // 注册 PNG 导出处理器
+  useEffect(() => {
+    registerExportPng(() => {
+      if (!stageRef.current) {
+        return;
+      }
+      const dataUrl = stageRef.current.toDataURL({
+        mimeType: "image/png",
+        pixelRatio: 2,
+      });
+      const link = document.createElement("a");
+      link.download = `voice2art-${Date.now()}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+  }, [registerExportPng]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -46,6 +67,7 @@ export default function DrawingCanvas() {
         <Stage
           className="rounded-lg border bg-card shadow-xs"
           height={size.height}
+          ref={stageRef}
           width={size.width}
         >
           <Layer>
