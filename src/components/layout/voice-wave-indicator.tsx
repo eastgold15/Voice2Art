@@ -5,7 +5,7 @@ import { useVoice } from "@/hooks/use-voice";
 import { cn } from "@/lib/utils";
 
 export default function VoiceWaveIndicator() {
-  const { isListening, toggleListening, interimText } = useVoice();
+  const { isListening, toggleListening, interimText, error } = useVoice();
 
   return (
     <div className="flex items-center gap-2">
@@ -43,6 +43,11 @@ export default function VoiceWaveIndicator() {
       {interimText && (
         <span className="max-w-48 truncate text-muted-foreground text-xs">
           {interimText}
+        </span>
+      )}
+      {error && !isListening && (
+        <span className="max-w-48 truncate text-red-500 text-xs">
+          {error.error}: {error.message}
         </span>
       )}
     </div>
