@@ -2,18 +2,28 @@
 
 import { create } from "zustand";
 
+import type { Instruction, Position } from "@/types/drawing";
+import { ANCHOR_MAP, SIZE_MAP } from "@/types/drawing";
+
+// ===================== Shape 类型 =====================
+
 export interface Shape {
+  closed?: boolean;
   fill?: string;
   height?: number;
   points?: number[];
   radius?: number;
+  radiusX?: number;
+  radiusY?: number;
   stroke: string;
   strokeWidth: number;
-  type: "rect" | "circle" | "line";
+  type: "rect" | "circle" | "ellipse" | "line";
   width?: number;
   x: number;
   y: number;
 }
+
+// ===================== Command 类型 =====================
 
 export interface Command {
   id: string;
@@ -22,62 +32,320 @@ export interface Command {
   timestamp: number;
 }
 
+// ===================== 坐标工具函数 =====================
+
+function normalizeLocation(loc: unknown, lastPos: Position | null): Position {
+  if (!loc) {
+    return ANCHOR_MAP.center;
+  }
+
+  if (typeof loc === "string") {
+    return ANCHOR_MAP[loc] ?? ANCHOR_MAP.center;
+  }
+
+  if (typeof loc === "object" && loc !== null) {
+    const obj = loc as Record<string, unknown>;
+
+    // { relativeTo: "last", dx, dy }
+    if ("relativeTo" in obj && obj.relativeTo === "last" && lastPos) {
+      return {
+        x: lastPos.x + ((obj.dx as number) ?? 0),
+        y: lastPos.y + ((obj.dy as number) ?? 0),
+      };
+    }
+
+    // { x, y }
+    if (typeof obj.x === "number" && typeof obj.y === "number") {
+      return { x: obj.x, y: obj.y };
+    }
+  }
+
+  return ANCHOR_MAP.center;
+}
+
+function abstractToPixel(value: number, canvasSize: number): number {
+  return Math.round((value / 1000) * canvasSize);
+}
+
+// ===================== Store 定义 =====================
+
 interface DrawingStore {
   addCommand: (text: string) => void;
   addShape: (shape: Shape) => void;
+  canvasHeight: number;
+  canvasWidth: number;
   clearCanvas: () => void;
   clearCommands: () => void;
-  // 画布配置
   commands: Command[];
   currentColor: string;
   currentStrokeWidth: number;
-
-  // 历史记录（撤销/重做）
+  executeInstructions: (instructions: Instruction[]) => void;
   history: Shape[][];
   historyIndex: number;
-
-  // UI 状态
   isListening: boolean;
   redo: () => void;
-
-  // Actions
+  setCanvasSize: (w: number, h: number) => void;
   setColor: (color: string) => void;
   setListening: (v: boolean) => void;
   setStrokeWidth: (width: number) => void;
-
-  // 图形列表
   shapes: Shape[];
+  showGrid: boolean;
   theme: "light" | "dark";
+  toggleGrid: () => void;
   toggleTheme: () => void;
   undo: () => void;
 }
 
+// ===================== 指令执行辅助函数 =====================
+
+interface InsCtx {
+  canvasHeight: number;
+  canvasWidth: number;
+}
+
+function shapeForDraw(
+  ins: Extract<Instruction, { action: "draw" }>,
+  ctx: InsCtx,
+  lastPos: Position | null,
+  get: () => DrawingStore
+): Shape {
+  const { canvasWidth, canvasHeight } = ctx;
+  const at = normalizeLocation(ins.at, lastPos);
+  const px = abstractToPixel(at.x, canvasWidth);
+  const py = abstractToPixel(at.y, canvasHeight);
+  const color = ins.color || get().currentColor;
+  const fill = ins.fill || color;
+  const sw = ins.strokeWidth ?? get().currentStrokeWidth;
+
+  switch (ins.shape) {
+    case "rectangle":
+      return shapeRect(ins, px, py, canvasWidth, canvasHeight, fill, color, sw);
+    case "circle":
+      return shapeCircle(
+        ins,
+        px,
+        py,
+        canvasWidth,
+        canvasHeight,
+        fill,
+        color,
+        sw
+      );
+    case "ellipse":
+      return shapeEllipse(
+        ins,
+        px,
+        py,
+        canvasWidth,
+        canvasHeight,
+        fill,
+        color,
+        sw
+      );
+    case "line":
+      return shapeLine(
+        ins,
+        px,
+        py,
+        at,
+        lastPos,
+        canvasWidth,
+        canvasHeight,
+        color,
+        sw
+      );
+    case "triangle":
+      return shapeTriangle(
+        ins,
+        px,
+        py,
+        canvasWidth,
+        canvasHeight,
+        fill,
+        color,
+        sw
+      );
+    default:
+      return shapeRect(ins, px, py, canvasWidth, canvasHeight, fill, color, sw);
+  }
+}
+
+function shapeRect(
+  ins: Extract<Instruction, { action: "draw" }>,
+  px: number,
+  py: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  fill: string,
+  color: string,
+  sw: number
+): Shape {
+  const s = ins.size ? SIZE_MAP[ins.size] : SIZE_MAP.medium;
+  const w = ins.width ?? s;
+  const h = ins.height ?? s;
+  return {
+    type: "rect",
+    x: px - Math.floor(abstractToPixel(w, canvasWidth) / 2),
+    y: py - Math.floor(abstractToPixel(h, canvasHeight) / 2),
+    width: abstractToPixel(w, canvasWidth),
+    height: abstractToPixel(h, canvasHeight),
+    fill,
+    stroke: color,
+    strokeWidth: sw,
+  };
+}
+
+function shapeCircle(
+  ins: Extract<Instruction, { action: "draw" }>,
+  px: number,
+  py: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  fill: string,
+  color: string,
+  sw: number
+): Shape {
+  const s = ins.size ? SIZE_MAP[ins.size] : SIZE_MAP.medium;
+  const r = ins.radius ?? Math.floor(s / 2);
+  return {
+    type: "circle",
+    x: px,
+    y: py,
+    radius: abstractToPixel(r, Math.min(canvasWidth, canvasHeight)),
+    fill,
+    stroke: color,
+    strokeWidth: sw,
+  };
+}
+
+function shapeEllipse(
+  ins: Extract<Instruction, { action: "draw" }>,
+  px: number,
+  py: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  fill: string,
+  color: string,
+  sw: number
+): Shape {
+  const s = ins.size ? SIZE_MAP[ins.size] : SIZE_MAP.medium;
+  const w = ins.width ?? s;
+  const h = ins.height ?? s;
+  return {
+    type: "ellipse",
+    x: px,
+    y: py,
+    radiusX: Math.floor(abstractToPixel(w, canvasWidth) / 2),
+    radiusY: Math.floor(abstractToPixel(h, canvasHeight) / 2),
+    fill,
+    stroke: color,
+    strokeWidth: sw,
+  };
+}
+
+function shapeLine(
+  ins: Extract<Instruction, { action: "draw" }>,
+  px: number,
+  py: number,
+  at: Position,
+  lastPos: Position | null,
+  canvasWidth: number,
+  canvasHeight: number,
+  color: string,
+  sw: number
+): Shape {
+  const to = ins.to
+    ? normalizeLocation(ins.to, lastPos)
+    : { x: at.x + 200, y: at.y };
+  return {
+    type: "line",
+    x: 0,
+    y: 0,
+    points: [
+      px,
+      py,
+      abstractToPixel(to.x, canvasWidth),
+      abstractToPixel(to.y, canvasHeight),
+    ],
+    stroke: color,
+    strokeWidth: sw,
+  };
+}
+
+function shapeTriangle(
+  ins: Extract<Instruction, { action: "draw" }>,
+  px: number,
+  py: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  fill: string,
+  color: string,
+  sw: number
+): Shape {
+  const s = ins.size ? SIZE_MAP[ins.size] : SIZE_MAP.medium;
+  const side = abstractToPixel(s, Math.min(canvasWidth, canvasHeight));
+  const halfSide = Math.floor(side / 2);
+  const triHeight = Math.floor(side * 0.866);
+  return {
+    type: "line",
+    x: 0,
+    y: 0,
+    closed: true,
+    points: [
+      px,
+      py - Math.floor((triHeight * 2) / 3),
+      px - halfSide,
+      py + Math.floor(triHeight / 3),
+      px + halfSide,
+      py + Math.floor(triHeight / 3),
+    ],
+    fill,
+    stroke: color,
+    strokeWidth: sw,
+  };
+}
+
+function applyStyle(
+  style: "color" | "stroke-width" | "fill",
+  value: string | number,
+  set: (partial: Partial<DrawingStore>) => void
+) {
+  if (style === "color") {
+    set({ currentColor: String(value) });
+  } else if (style === "stroke-width") {
+    set({ currentStrokeWidth: Number(value) });
+  } else if (style === "fill") {
+    set({ currentColor: String(value) });
+  }
+}
+
 export const useDrawingStore = create<DrawingStore>((set, get) => ({
+  // === 状态 ===
+  canvasHeight: 600,
+  canvasWidth: 800,
   commands: [],
   currentColor: "#000000",
   currentStrokeWidth: 3,
-  shapes: [],
-  isListening: false,
-  theme: "light",
   history: [[]],
   historyIndex: 0,
+  isListening: false,
+  shapes: [],
+  showGrid: false,
+  theme: "light",
 
-  addCommand: (text) => {
-    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const command: Command = {
-      id,
-      text,
-      timestamp: Date.now(),
-      shapeCount: get().shapes.length,
-    };
-    set({ commands: [...get().commands, command] });
-  },
-
-  clearCommands: () => set({ commands: [] }),
+  // === 基础操作 ===
 
   setColor: (color) => set({ currentColor: color }),
 
   setStrokeWidth: (width) => set({ currentStrokeWidth: width }),
+
+  setCanvasSize: (w, h) =>
+    set((s) => {
+      if (s.canvasWidth === w && s.canvasHeight === h) {
+        return s;
+      }
+      return { canvasWidth: w, canvasHeight: h };
+    }),
 
   addShape: (shape) => {
     const newShapes = [...get().shapes, shape];
@@ -113,8 +381,70 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     }
   },
 
+  addCommand: (text) => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    set({
+      commands: [
+        ...get().commands,
+        {
+          id,
+          text,
+          timestamp: Date.now(),
+          shapeCount: get().shapes.length,
+        },
+      ],
+    });
+  },
+
+  clearCommands: () => set({ commands: [] }),
+
   toggleTheme: () =>
     set((s) => ({ theme: s.theme === "light" ? "dark" : "light" })),
 
+  toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+
   setListening: (v) => set({ isListening: v }),
+
+  // === executeInstructions (PR6 核心) ===
+
+  executeInstructions: (instructions) => {
+    const { canvasWidth, canvasHeight } = get();
+    let lastPos: Position | null = null;
+    const insCtx = { canvasWidth, canvasHeight };
+
+    for (const ins of instructions) {
+      switch (ins.action) {
+        case "draw": {
+          const shape = shapeForDraw(ins, insCtx, lastPos, get);
+          get().addShape(shape);
+
+          const s = ins.size ? SIZE_MAP[ins.size] : SIZE_MAP.medium;
+          const refW = ins.width ?? s;
+          const at = normalizeLocation(ins.at, lastPos);
+          lastPos = {
+            x: at.x + Math.floor(refW / 2),
+            y: at.y + 100,
+          };
+          break;
+        }
+        case "set-style":
+          applyStyle(ins.style, ins.value, set);
+          break;
+        case "clear":
+          get().clearCanvas();
+          break;
+        case "undo":
+          get().undo();
+          break;
+        case "redo":
+          get().redo();
+          break;
+        case "toggle-grid":
+          get().toggleGrid();
+          break;
+        default:
+          break;
+      }
+    }
+  },
 }));

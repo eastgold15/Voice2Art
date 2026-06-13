@@ -1,6 +1,14 @@
 "use client";
 
-import { Minus, Paintbrush, Plus, Redo2, Trash2, Undo2 } from "lucide-react";
+import {
+  Grid3X3,
+  Minus,
+  Paintbrush,
+  Plus,
+  Redo2,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 import VoiceWaveIndicator from "@/components/layout/voice-wave-indicator";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -23,6 +31,7 @@ export default function BottomToolbar() {
   const {
     currentColor,
     currentStrokeWidth,
+    showGrid,
     shapes,
     historyIndex,
     history,
@@ -31,6 +40,7 @@ export default function BottomToolbar() {
     clearCanvas,
     undo,
     redo,
+    toggleGrid,
   } = useDrawingStore();
 
   const canUndo = historyIndex > 0;
@@ -96,6 +106,16 @@ export default function BottomToolbar() {
 
       {/* Actions */}
       <div className="flex items-center gap-0.5">
+        <Button
+          aria-label={showGrid ? "隐藏坐标网格" : "显示坐标网格"}
+          className={showGrid ? "text-voice-accent" : ""}
+          data-active={showGrid ? "" : undefined}
+          onClick={toggleGrid}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Grid3X3 className="size-4" />
+        </Button>
         <Button
           aria-label="撤销"
           disabled={!canUndo}
