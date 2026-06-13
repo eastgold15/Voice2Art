@@ -188,4 +188,30 @@ function createSpeechService(): SpeechService {
   return svc;
 }
 
-export const speechService = createSpeechService();
+// Lazy-initialized singleton — deferred to first access so window is available
+let _service: SpeechService | null = null;
+
+function getService(): SpeechService {
+  if (!_service) {
+    _service = createSpeechService();
+  }
+  return _service;
+}
+
+export const speechService: SpeechService = new Proxy({} as SpeechService, {
+  get(_target, prop, receiver) {
+    return Reflect.get(
+      getService() as unknown as Record<string | symbol, unknown>,
+      prop,
+      receiver
+    );
+  },
+  set(_target, prop, value, receiver) {
+    return Reflect.set(
+      getService() as unknown as Record<string | symbol, unknown>,
+      prop,
+      value,
+      receiver
+    );
+  },
+});
