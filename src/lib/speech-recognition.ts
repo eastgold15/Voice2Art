@@ -128,6 +128,19 @@ function createRealtimeService(): SpeechService {
         return;
       }
 
+      // 清理上一次会话的残留（防止旧 onclose 污染新 session）
+      if (ws) {
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+        ws = null;
+      }
+      recorder?.stop();
+      recorder = null;
+      started = false;
+
       try {
         // 1. 获取 Token
         console.log("[Voice] 获取 NLS Token…");
@@ -150,8 +163,9 @@ function createRealtimeService(): SpeechService {
 
         // 3. 连接 WebSocket
         const wsUrl = `${NLS_WS_URL}?token=${token}`;
-        ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
+        const currentWs = new WebSocket(wsUrl);
+        ws = currentWs;
+        currentWs.binaryType = "arraybuffer";
         taskId = uid32();
         started = false;
 
@@ -246,7 +260,12 @@ function createRealtimeService(): SpeechService {
           console.error("[Voice] WebSocket 错误:", err);
         };
 
-        ws.onclose = (e: CloseEvent) => {
+        currentWs.onclose = (e: CloseEvent) => {
+          // 忽略非当前会话的关闭事件（旧 session 残留）
+          if (ws !== currentWs) {
+            console.log(`[Voice] 旧 WebSocket 关闭 code=${e.code}，忽略`);
+            return;
+          }
           console.log(`[Voice] WebSocket 关闭 code=${e.code}`);
           started = false;
           recorder?.stop();
@@ -290,16 +309,14 @@ function createRealtimeService(): SpeechService {
       }
 
       // 停止录音
-      await recorder.stop();
+      recorder.stop();
       recorder = null;
 
-      // 关闭 WebSocket（如果还没关）
-      setTimeout(() => {
-        if (ws?.readyState === WebSocket.OPEN) {
-          ws.close();
-        }
-        ws = null;
-      }, 500);
+      // 立即关闭 WebSocket
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+      ws = null;
     },
   };
 

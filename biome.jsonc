@@ -12,7 +12,8 @@
         "noExplicitAny": "off",
         "noEmptyBlockStatements": "off",
         "useIterableCallbackReturn": "off",
-        "noBitwiseOperators": "off"
+        "noBitwiseOperators": "off",
+        "useAwait": "off"
       },
       "style": {
         "useBlockStatements": "off"
