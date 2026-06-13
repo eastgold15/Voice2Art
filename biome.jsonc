@@ -11,7 +11,8 @@
         "noArrayIndexKey": "off",
         "noExplicitAny": "off",
         "noEmptyBlockStatements": "off",
-        "useIterableCallbackReturn": "off"
+        "useIterableCallbackReturn": "off",
+        "noBitwiseOperators": "off"
       },
       "style": {
         "useBlockStatements": "off"
@@ -23,7 +24,8 @@
         "useTopLevelRegex": "off"
       },
       "complexity": {
-        "noExcessiveCognitiveComplexity": "off"
+        "noExcessiveCognitiveComplexity": "off",
+        "noForEach": "off"
       }
     }
   }
