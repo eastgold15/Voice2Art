@@ -12,7 +12,54 @@ export function useVoice() {
   const setListening = useDrawingStore((s) => s.setListening);
   const [interimText, setInterimText] = useState("");
   const [error, setError] = useState<SpeechError | null>(null);
+  const [isLlmThinking, setIsLlmThinking] = useState(false);
   const _processingRef = useRef(false);
+
+  // handleFinal 定义在 hook 内，闭包访问 setIsLlmThinking
+  const handleFinal = useCallback(async (text: string) => {
+    console.log("[Voice] 最终识别文本:", text);
+
+    const store = useDrawingStore.getState();
+    store.addCommand(text);
+
+    // 创建一个 Promise 来包装 routeCommandStream，以便追踪 LLM 状态
+    const executeStream = async () => {
+      let calledLlm = false;
+
+      const ok = await routeCommandStream(
+        text,
+        (drawShape) => {
+          store.executeInstructions([drawShape]);
+        },
+        (setStyle) => {
+          store.executeInstructions([setStyle]);
+        },
+        (canvasControl) => {
+          store.executeInstructions([canvasControl]);
+        },
+        // onLlmStart — LLM 开始流式调用
+        () => {
+          calledLlm = true;
+          setIsLlmThinking(true);
+        },
+        // onLlmEnd — LLM 流式完成
+        () => {
+          setIsLlmThinking(false);
+        }
+      );
+
+      // 如果走了 LLM 路径但失败了，也要关闭云朵
+      if (calledLlm) {
+        setIsLlmThinking(false);
+      }
+
+      if (!ok) {
+        toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
+      }
+    };
+
+    await executeStream();
+  }, []);
 
   useEffect(() => {
     const svc = getSpeechService();
@@ -38,19 +85,36 @@ export function useVoice() {
       setListening(false);
     };
 
+    // 服务真正就绪后才切换 UI 状态
+    svc.onReady = () => {
+      console.log("[Voice] onReady → 服务已就绪");
+      setListening(true);
+    };
+
     return () => {
       svc.onResult = null;
       svc.onError = null;
       svc.onEnd = null;
+      svc.onReady = null;
     };
-  }, [setListening]);
+  }, [setListening, handleFinal]);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     const svc = getSpeechService();
     setError(null);
-    svc.start();
-    setListening(true);
-  }, [setListening]);
+    setIsLlmThinking(false);
+
+    try {
+      await svc.start();
+      // UI 状态由 onReady 回调在 TranscriptionStarted 时设置
+    } catch (err) {
+      console.error("[Voice] 启动失败:", err);
+      setError({
+        message: `启动语音识别失败: ${String(err)}`,
+        error: "audio-capture",
+      });
+    }
+  }, []);
 
   const stopListening = useCallback(() => {
     const svc = getSpeechService();
@@ -73,36 +137,6 @@ export function useVoice() {
     toggleListening,
     interimText,
     error,
+    isLlmThinking,
   };
-}
-
-async function handleFinal(text: string) {
-  console.log("[Voice] 最终识别文本:", text);
-
-  const store = useDrawingStore.getState();
-  store.addCommand(text);
-
-  // 流式路由 — 每条指令到达就立即绘制到画布
-  const ok = await routeCommandStream(
-    text,
-    // onDraw — LLM 每生成一条指令立即绘制一个图形
-    (drawShape) => {
-      console.log(
-        `[Voice] 流式绘制 → ${drawShape.shape} ${drawShape.color || ""}`
-      );
-      store.executeInstructions([drawShape]);
-    },
-    // onStyle — 正则样式指令
-    (setStyle) => {
-      store.executeInstructions([setStyle]);
-    },
-    // onAction — 正则动作指令
-    (canvasControl) => {
-      store.executeInstructions([canvasControl]);
-    }
-  );
-
-  if (!ok) {
-    toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
-  }
 }

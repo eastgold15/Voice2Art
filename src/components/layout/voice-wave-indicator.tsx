@@ -1,20 +1,38 @@
 "use client";
 
 import { Mic, MicOff } from "lucide-react";
+
+import LlmCloud from "@/components/llm-cloud";
 import { useVoice } from "@/hooks/use-voice";
 import { cn } from "@/lib/utils";
 
 export default function VoiceWaveIndicator() {
-  const { isListening, toggleListening, interimText, error } = useVoice();
+  const { isListening, toggleListening, interimText, error, isLlmThinking } =
+    useVoice();
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="relative flex items-center gap-2">
+      {/* 实时识别文字 — 显示在按钮上方 */}
+      {interimText && (
+        <div className="absolute -top-8 right-0 left-0 z-10">
+          <div className="mx-auto w-fit max-w-64 rounded-full bg-muted/80 px-3 py-1 backdrop-blur-sm">
+            <p className="animate-pulse text-center text-[11px] text-muted-foreground">
+              🎤 {interimText}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* LLM 云朵 */}
+      <LlmCloud thinking={isLlmThinking} />
+
+      {/* 麦克风按钮 */}
       <button
         aria-label={isListening ? "停止监听" : "开始监听"}
         className={cn(
-          "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-muted",
+          "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-all duration-300 hover:bg-muted",
           isListening
-            ? "bg-voice-wave/10 text-voice-wave"
+            ? "bg-voice-wave/10 text-voice-wave shadow-[0_0_12px_-4px] shadow-voice-wave/30"
             : "text-muted-foreground"
         )}
         onClick={toggleListening}
@@ -40,11 +58,8 @@ export default function VoiceWaveIndicator() {
           </>
         )}
       </button>
-      {interimText && (
-        <span className="max-w-48 truncate text-muted-foreground text-xs">
-          {interimText}
-        </span>
-      )}
+
+      {/* 错误提示 */}
       {error && !isListening && (
         <span className="max-w-48 truncate text-red-500 text-xs">
           {error.error}: {error.message}

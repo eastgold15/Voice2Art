@@ -2,8 +2,10 @@
 
 import { History, Play } from "lucide-react";
 import { useRef } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { routeCommandStream } from "@/lib/command-router";
 import { cn } from "@/lib/utils";
 import { useDrawingStore } from "@/store/use-drawing-store";
 
@@ -17,6 +19,28 @@ export default function CommandHistory() {
     const mm = d.getMinutes().toString().padStart(2, "0");
     const ss = d.getSeconds().toString().padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
+  };
+
+  const handleReplay = async (text: string) => {
+    const store = useDrawingStore.getState();
+    toast.info(`正在重新执行: "${text}"`);
+
+    const ok = await routeCommandStream(
+      text,
+      (drawShape) => {
+        store.executeInstructions([drawShape]);
+      },
+      (setStyle) => {
+        store.executeInstructions([setStyle]);
+      },
+      (canvasControl) => {
+        store.executeInstructions([canvasControl]);
+      }
+    );
+
+    if (!ok) {
+      toast.error(`无法重新执行指令: "${text}"`);
+    }
   };
 
   return (
@@ -65,6 +89,7 @@ export default function CommandHistory() {
                   <Button
                     aria-label="回放此指令"
                     className="mt-0.5 shrink-0 opacity-0 group-hover:opacity-100"
+                    onClick={() => handleReplay(cmd.text)}
                     size="icon-xs"
                     variant="ghost"
                   >
