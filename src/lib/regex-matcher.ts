@@ -290,9 +290,14 @@ export function matchCommand(text: string): RegexResult | null {
   for (const rule of rules) {
     const match = cleaned.match(rule.pattern);
     if (match) {
-      return rule.handler(cleaned, match);
+      const result = rule.handler(cleaned, match);
+      console.log(
+        `[Router] 正则匹配 ✅ | 输入:"${cleaned}" | 规则:${rule.pattern.source.slice(0, 50)} | 类型:${result.type}`
+      );
+      return result;
     }
   }
 
+  console.log(`[Router] 正则未匹配 ❌ | 输入:"${cleaned}" → 降级到 LLM`);
   return null;
 }

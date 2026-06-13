@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { routeCommand } from "@/lib/command-router";
 import type { SpeechError, SpeechEvent } from "@/lib/speech-recognition";
@@ -12,6 +12,7 @@ export function useVoice() {
   const setListening = useDrawingStore((s) => s.setListening);
   const [interimText, setInterimText] = useState("");
   const [error, setError] = useState<SpeechError | null>(null);
+  const _processingRef = useRef(false);
 
   useEffect(() => {
     const svc = getSpeechService();
@@ -75,9 +76,10 @@ export function useVoice() {
   };
 }
 
-function handleFinal(text: string) {
+async function handleFinal(text: string) {
   console.log("[Voice] 最终识别文本:", text);
-  const result = routeCommand(text);
+
+  const result = await routeCommand(text);
 
   if (!result) {
     toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
