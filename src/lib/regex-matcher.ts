@@ -289,10 +289,28 @@ export function matchCommand(text: string): RegexResult | null {
 
   for (const rule of rules) {
     const match = cleaned.match(rule.pattern);
-    if (match) {
-      return rule.handler(cleaned, match);
+    if (match?.[0]) {
+      const result = rule.handler(cleaned, match);
+
+      // 检查是否有多步指令被截断：
+      // 匹配到的文本后面如果还包含"画"关键词 → 让 LLM 处理
+      const matchedEnd = (match.index ?? 0) + match[0].length;
+      const remaining = cleaned.slice(matchedEnd);
+
+      if (result.type === "draw" && /画/.test(remaining)) {
+        console.log(
+          `[Router] 检测到多步指令 ⚠️ | 已匹配:"${match[0]}" | 剩余:"${remaining}" → 降级到 LLM`
+        );
+        return null;
+      }
+
+      console.log(
+        `[Router] 正则匹配 ✅ | 输入:"${cleaned}" | 规则:${rule.pattern.source.slice(0, 50)} | 类型:${result.type}`
+      );
+      return result;
     }
   }
 
+  console.log(`[Router] 正则未匹配 ❌ | 输入:"${cleaned}" → 降级到 LLM`);
   return null;
 }

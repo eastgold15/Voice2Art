@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { routeCommand } from "@/lib/command-router";
+import { routeCommandStream } from "@/lib/command-router";
 import type { SpeechError, SpeechEvent } from "@/lib/speech-recognition";
 import { getSpeechService } from "@/lib/speech-recognition";
 import { useDrawingStore } from "@/store/use-drawing-store";
@@ -12,6 +12,7 @@ export function useVoice() {
   const setListening = useDrawingStore((s) => s.setListening);
   const [interimText, setInterimText] = useState("");
   const [error, setError] = useState<SpeechError | null>(null);
+  const _processingRef = useRef(false);
 
   useEffect(() => {
     const svc = getSpeechService();
@@ -75,30 +76,33 @@ export function useVoice() {
   };
 }
 
-function handleFinal(text: string) {
+async function handleFinal(text: string) {
   console.log("[Voice] 最终识别文本:", text);
-  const result = routeCommand(text);
-
-  if (!result) {
-    toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
-    return;
-  }
 
   const store = useDrawingStore.getState();
   store.addCommand(text);
 
-  switch (result.type) {
-    case "draw":
-      store.executeInstructions(result.instructions);
-      break;
-    case "style":
-      store.executeInstructions([result.instruction]);
-      break;
-    case "action":
-      store.executeInstructions([result.instruction]);
-      break;
-    default:
-      toast.error("无法识别的指令");
-      break;
+  // 流式路由 — 每条指令到达就立即绘制到画布
+  const ok = await routeCommandStream(
+    text,
+    // onDraw — LLM 每生成一条指令立即绘制一个图形
+    (drawShape) => {
+      console.log(
+        `[Voice] 流式绘制 → ${drawShape.shape} ${drawShape.color || ""}`
+      );
+      store.executeInstructions([drawShape]);
+    },
+    // onStyle — 正则样式指令
+    (setStyle) => {
+      store.executeInstructions([setStyle]);
+    },
+    // onAction — 正则动作指令
+    (canvasControl) => {
+      store.executeInstructions([canvasControl]);
+    }
+  );
+
+  if (!ok) {
+    toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
   }
 }
