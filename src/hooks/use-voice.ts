@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { routeCommand } from "@/lib/command-router";
 import type { SpeechError, SpeechEvent } from "@/lib/speech-recognition";
-import { speechService } from "@/lib/speech-recognition";
+import { getSpeechService } from "@/lib/speech-recognition";
 import { useDrawingStore } from "@/store/use-drawing-store";
 
 export function useVoice() {
@@ -14,7 +14,9 @@ export function useVoice() {
   const [error, setError] = useState<SpeechError | null>(null);
 
   useEffect(() => {
-    speechService.onResult = (event: SpeechEvent) => {
+    const svc = getSpeechService();
+
+    svc.onResult = (event: SpeechEvent) => {
       if (event.type === "interim") {
         setInterimText(event.text);
       } else {
@@ -23,31 +25,35 @@ export function useVoice() {
       }
     };
 
-    speechService.onError = (err: SpeechError) => {
+    svc.onError = (err: SpeechError) => {
+      console.error("[Voice] onError:", err);
       setError(err);
       setListening(false);
       toast.error(err.message);
     };
 
-    speechService.onEnd = () => {
+    svc.onEnd = () => {
+      console.log("[Voice] onEnd");
       setListening(false);
     };
 
     return () => {
-      speechService.onResult = null;
-      speechService.onError = null;
-      speechService.onEnd = null;
+      svc.onResult = null;
+      svc.onError = null;
+      svc.onEnd = null;
     };
   }, [setListening]);
 
   const startListening = useCallback(() => {
-    speechService.start();
-    setListening(true);
+    const svc = getSpeechService();
     setError(null);
+    svc.start();
+    setListening(true);
   }, [setListening]);
 
   const stopListening = useCallback(() => {
-    speechService.stop();
+    const svc = getSpeechService();
+    svc.stop();
     setListening(false);
   }, [setListening]);
 
@@ -70,10 +76,11 @@ export function useVoice() {
 }
 
 function handleFinal(text: string) {
+  console.log("[Voice] 最终识别文本:", text);
   const result = routeCommand(text);
 
   if (!result) {
-    toast.error('无法识别的指令，请尝试说"画红色大圆"');
+    toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
     return;
   }
 

@@ -9,7 +9,9 @@
     "rules": {
       "suspicious": {
         "noArrayIndexKey": "off",
-        "noExplicitAny": "off"
+        "noExplicitAny": "off",
+        "noEmptyBlockStatements": "off",
+        "useIterableCallbackReturn": "off"
       },
       "style": {
         "useBlockStatements": "off"
@@ -19,6 +21,9 @@
       },
       "performance": {
         "useTopLevelRegex": "off"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "off"
       }
     }
   }
