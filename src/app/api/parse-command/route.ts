@@ -9,6 +9,8 @@ const openai = new OpenAI({
 });
 
 const SYSTEM_PROMPT = `你是一个语音绘图指令解析器。用户用中文描述绘图操作，请逐条解析为 JSON 指令。
+# 注意
+不要遮挡
 
 ## 输出格式（JSONL — 每行一个 JSON 对象，不要外层数组）
 

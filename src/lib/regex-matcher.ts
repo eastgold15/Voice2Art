@@ -284,26 +284,30 @@ const rules: Rule[] = [
 
 // ===================== 主入口 =====================
 
+// 所有图形关键词（用于多步检测）
+const ALL_SHAPE_KEYS =
+  /大圆|小圆|圆|圈|圆形|正方|长方|方框|矩形|方块|直线|线|线条|三角|三角形|椭圆/g;
+
 export function matchCommand(text: string): RegexResult | null {
   const cleaned = text.trim();
+
+  // 预检：画图类指令含多步特征 → 跳过正则交给 LLM
+  // 样式（"红色"）和动作（"清空"）不走预检
+  if (/^画/.test(cleaned)) {
+    const shapeHits = [...cleaned.matchAll(ALL_SHAPE_KEYS)].length;
+    const drawHits = (cleaned.match(/画/g) || []).length;
+    if (drawHits >= 2 || shapeHits >= 2) {
+      console.log(
+        `[Router] 多步画图 ⏩ | draw:${drawHits} shape:${shapeHits} → 降级 LLM`
+      );
+      return null;
+    }
+  }
 
   for (const rule of rules) {
     const match = cleaned.match(rule.pattern);
     if (match?.[0]) {
       const result = rule.handler(cleaned, match);
-
-      // 检查是否有多步指令被截断：
-      // 匹配到的文本后面如果还包含"画"关键词 → 让 LLM 处理
-      const matchedEnd = (match.index ?? 0) + match[0].length;
-      const remaining = cleaned.slice(matchedEnd);
-
-      if (result.type === "draw" && /画/.test(remaining)) {
-        console.log(
-          `[Router] 检测到多步指令 ⚠️ | 已匹配:"${match[0]}" | 剩余:"${remaining}" → 降级到 LLM`
-        );
-        return null;
-      }
-
       console.log(
         `[Router] 正则匹配 ✅ | 输入:"${cleaned}" | 规则:${rule.pattern.source.slice(0, 50)} | 类型:${result.type}`
       );

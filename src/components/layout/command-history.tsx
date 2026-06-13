@@ -31,9 +31,12 @@ export default function CommandHistory() {
       return;
     }
 
-    // 直接执行缓存的指令，不调 API
-    if (cmd.instructions.length > 0) {
-      store.executeInstructions(cmd.instructions);
+    // 逐条绘制，每条间隔 250ms，产生动画效果
+    for (let i = 0; i < cmd.instructions.length; i++) {
+      store.executeInstructions([cmd.instructions[i]]);
+      if (i < cmd.instructions.length - 1) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
     }
 
     setReplaying(null);
