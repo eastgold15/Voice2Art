@@ -1,52 +1,10 @@
 import { NextResponse } from "next/server";
+import { getNlsToken } from "@/lib/nls-token";
 
 // ===================== 配置 =====================
 
 const NLS_URL = "wss://nls-gateway.cn-shanghai.aliyuncs.com/ws/v1";
 const NLS_APP_KEY = process.env.NLS_APP_KEY || "i781xeacryhWqkzC";
-const ALIYUN_AK_ID = process.env.ALIYUN_AK_ID || "";
-const ALIYUN_AK_SECRET = process.env.ALIYUN_AK_SECRET || "";
-const ALIYUN_ENDPOINT = "http://nls-meta.cn-shanghai.aliyuncs.com";
-
-// ===================== Token 缓存 =====================
-
-interface CachedToken {
-  expireTime: number; // epoch ms
-  id: string;
-}
-
-let _cachedToken: CachedToken | null = null;
-
-async function getNlsToken(): Promise<string> {
-  // 缓存有效时直接返回（提前 5 分钟刷新）
-  if (_cachedToken && Date.now() < _cachedToken.expireTime - 300_000) {
-    console.log("[NLS] 使用缓存 Token");
-    return _cachedToken.id;
-  }
-
-  console.log("[NLS] 生成新 Token…");
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { RPCClient } = require("@alicloud/pop-core");
-
-  const client = new RPCClient({
-    accessKeyId: ALIYUN_AK_ID,
-    accessKeySecret: ALIYUN_AK_SECRET,
-    endpoint: ALIYUN_ENDPOINT,
-    apiVersion: "2019-02-28",
-  });
-
-  const result = await client.request("CreateToken");
-  _cachedToken = {
-    id: result.Token.Id as string,
-    expireTime: (result.Token.ExpireTime as number) * 1000, // 秒 → 毫秒
-  };
-
-  console.log(
-    `[NLS] Token 已更新，过期时间: ${new Date(_cachedToken.expireTime).toISOString()}`
-  );
-  return _cachedToken.id;
-}
 
 // ===================== 识别函数 =====================
 
@@ -114,7 +72,7 @@ function recognizePcm(audioBuffer: Buffer, token: string): Promise<string> {
 export async function POST(request: Request) {
   try {
     // 1. 检查凭据
-    if (!(ALIYUN_AK_ID && ALIYUN_AK_SECRET)) {
+    if (!(process.env.ALIYUN_AK_ID && process.env.ALIYUN_AK_SECRET)) {
       return NextResponse.json(
         {
           error:
