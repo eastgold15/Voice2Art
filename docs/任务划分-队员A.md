@@ -145,28 +145,32 @@ use-voice 中 switch (result.type) 分发到 store.executeInstructions
 
 ---
 
-## 第四阶段：PR7 — 混合模式 + 错误降级 + Toast + 指令回放
+## 第四阶段：PR7 — 混合模式 + 错误降级 + Toast + 指令回放 ✅
 
 **依赖：** PR5 已合并
-**分支名：** `feat/a-hybrid`
+**分支名：** 合并在 `feat/a-llm` 中提交
 
-### □ 7.1 完善混合路由策略
+### ☑ 7.1 完善混合路由策略 ✅
 
-三层策略：正则（毫秒） → LLM（1-2s） → Toast 降级
+三层策略已实现在 `command-router.ts`：正则（毫秒） → LLM 流式（1-2s） → Toast 降级
 
-### □ 7.2 指令历史记录
+### ☑ 7.2 指令历史记录 ✅
 
-store.addCommand → CommandHistory 组件展示
+`store.addCommand` 在 `use-voice.ts` 中调用 → `CommandHistory` 组件展示
 
-### □ 7.3 指令历史点击回放
+### ☑ 7.3 指令历史点击回放 ✅
 
-CommandHistory 回放按钮 → 重新 routeCommand → 执行
+`CommandHistory` Play 按钮 → `routeCommandStream` 重新解析 → 逐条绘制
+- 播放中按钮显示脉冲动画
+- 防重复点击（同时只能回放一条）
 
-### □ 7.4 Toast 错误提示
+### ☑ 7.4 Toast 错误提示 ✅
 
-sonner Toaster 已在布局中配置
+`sonner` Toaster 已在 `layout.tsx` 中配置：`<Toaster position="top-center" richColors />`
 
-### □ 7.5 验证
+### □ 7.5 验证 ⚠️
+
+> 待完整端到端测试
 
 ---
 
@@ -184,7 +188,7 @@ sonner Toaster 已在布局中配置
 
 | 顺序 | 状态 | 分支名 | 内容 |
 |------|------|--------|------|
-| ① | ✅ 已提 PR | `feat/a-voice` | 阿里云 NLS 实时语音识别 + 正则匹配 + 样式/动作指令 |
-| ② | ⏭ 下一步 | `feat/a-llm` | LLM 集成（GPT-4o-mini 或国产模型） |
-| ③ | ⏳ 待做 | `feat/a-hybrid` | 混合模式 + 回放 + 降级 |
-| ④ | ⏳ 待做 | `feat/a-polish` | 设计文档 + Demo |
+| ① | ✅ 已合并 | `feat/a-voice` | 阿里云 NLS 实时语音识别 + 正则匹配 + 样式/动作指令 |
+| ② | ✅ 已提 PR | `feat/a-llm` | DeepSeek V4 流式 LLM + 指令回放 + Toast 降级 |
+| ③ | ✅ 已提 PR | (含在 a-llm) | 混合模式 + 回放 + 降级 |
+| ④ | ⏭ 下一步 | `feat/a-polish` | 设计文档 + Demo |

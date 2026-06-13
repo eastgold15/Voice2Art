@@ -80,29 +80,34 @@ async function handleFinal(text: string) {
   console.log("[Voice] 最终识别文本:", text);
 
   const store = useDrawingStore.getState();
-  store.addCommand(text);
 
-  // 流式路由 — 每条指令到达就立即绘制到画布
+  // 收集指令，流式绘制完成后存入历史（供回放使用，避免重复调 API）
+  const collected: import("@/types/drawing").Instruction[] = [];
+
   const ok = await routeCommandStream(
     text,
-    // onDraw — LLM 每生成一条指令立即绘制一个图形
     (drawShape) => {
       console.log(
         `[Voice] 流式绘制 → ${drawShape.shape} ${drawShape.color || ""}`
       );
       store.executeInstructions([drawShape]);
+      collected.push(drawShape);
     },
-    // onStyle — 正则样式指令
     (setStyle) => {
       store.executeInstructions([setStyle]);
+      collected.push(setStyle);
     },
-    // onAction — 正则动作指令
     (canvasControl) => {
       store.executeInstructions([canvasControl]);
+      collected.push(canvasControl);
     }
   );
 
   if (!ok) {
     toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
+    return;
   }
+
+  // 存指令历史（含完整 parsed 结果，回放无需调 API）
+  store.addCommand(text, collected);
 }

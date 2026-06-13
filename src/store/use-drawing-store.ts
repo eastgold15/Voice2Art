@@ -27,6 +27,7 @@ export interface Shape {
 
 export interface Command {
   id: string;
+  instructions: Instruction[];
   shapeCount: number;
   text: string;
   timestamp: number;
@@ -70,7 +71,7 @@ function abstractToPixel(value: number, canvasSize: number): number {
 // ===================== Store 定义 =====================
 
 interface DrawingStore {
-  addCommand: (text: string) => void;
+  addCommand: (text: string, instructions?: Instruction[]) => void;
   addShape: (shape: Shape) => void;
   canvasHeight: number;
   canvasWidth: number;
@@ -381,13 +382,14 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     }
   },
 
-  addCommand: (text) => {
+  addCommand: (text, instructions) => {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     set({
       commands: [
         ...get().commands,
         {
           id,
+          instructions: instructions || [],
           text,
           timestamp: Date.now(),
           shapeCount: get().shapes.length,
