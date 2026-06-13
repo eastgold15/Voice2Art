@@ -42,7 +42,9 @@ export async function routeCommandStream(
   text: string,
   onDraw: (instruction: DrawShape) => void,
   onStyle?: (instruction: SetStyle) => void,
-  onAction?: (instruction: CanvasControl) => void
+  onAction?: (instruction: CanvasControl) => void,
+  onLlmStart?: () => void,
+  onLlmEnd?: () => void
 ): Promise<boolean> {
   // ① 正则（毫秒级）
   const regexResult = matchCommand(text);
@@ -60,5 +62,10 @@ export async function routeCommandStream(
 
   // ② LLM 流式
   console.log(`[Router] 正则未命中，启动 LLM 流式… | 输入:"${text}"`);
-  return await parseWithLLMStream(text, onDraw);
+  onLlmStart?.();
+  try {
+    return await parseWithLLMStream(text, onDraw);
+  } finally {
+    onLlmEnd?.();
+  }
 }

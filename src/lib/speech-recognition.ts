@@ -12,6 +12,7 @@ export interface SpeechService {
   isListening: boolean;
   onEnd: (() => void) | null;
   onError: ((error: SpeechError) => void) | null;
+  onReady: (() => void) | null;
   onResult: ((event: SpeechEvent) => void) | null;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -120,6 +121,7 @@ function createRealtimeService(): SpeechService {
     onResult: null,
     onError: null,
     onEnd: null,
+    onReady: null,
     isListening: false,
 
     async start() {
@@ -215,6 +217,7 @@ function createRealtimeService(): SpeechService {
               console.log("[Voice] 服务端就绪，开始实时识别");
               started = true;
               svc.isListening = true;
+              svc.onReady?.();
               break;
 
             case "TranscriptionResultChanged":
@@ -334,6 +337,7 @@ export function getSpeechService(): SpeechService {
       onResult: null,
       onError: null,
       onEnd: null,
+      onReady: null,
       start: async () => {},
       stop: async () => {},
     };

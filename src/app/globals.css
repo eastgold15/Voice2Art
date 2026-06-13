@@ -186,3 +186,18 @@
   background: var(--border);
   border-radius: 999px;
 }
+
+/* Float animation for LLM cloud */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-6px);
+  }
+}
+
+.animate-float {
+  animation: float 2.5s ease-in-out infinite;
+}
