@@ -1,123 +1,135 @@
-# Ultracite Code Standards
+# CLAUDE.md
 
-This project uses **Ultracite**, a zero-config preset that enforces strict code quality standards through automated formatting and linting.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Quick Reference
+## Commands
 
-- **Format code**: `bun x ultracite fix`
-- **Check for issues**: `bun x ultracite check`
-- **Diagnose setup**: `bun x ultracite doctor`
+```bash
+bun run dev       # Start dev server (Next.js dev)
+bun run build     # Production build
+bun run start     # Production start
+bun run typeCheck # TypeScript type check (bun x tsc --noEmit)
+bun run check     # Ultracite lint check (Biome)
+bun run fix       # Ultracite auto-fix
+bun x ultracite doctor  # Diagnose Ultracite setup
+```
 
-Biome (the underlying engine) provides robust linting and formatting. Most issues are automatically fixable.
+Post-write hooks in `.claude/settings.json` auto-run `bun run fix --skip=correctness/noUnusedImports` after Write/Edit.
 
----
+## Tech Stack
 
-## Core Principles
+| Layer | Choice |
+|-------|--------|
+| Framework | Next.js 16 (App Router) + TypeScript (strict) |
+| Canvas | react-konva + konva |
+| State | Zustand |
+| UI | shadcn/ui + Tailwind CSS v4 |
+| Voice | Web Speech API (SpeechRecognition) |
+| Code Quality | Ultracite (Biome) + Lefthook pre-commit hook |
+| Package Manager | Bun (bun.lock) |
+| React Compiler | Enabled (`reactCompiler: true` in next.config.ts) |
+| Path Alias | `@/` → `./src/*` |
 
-Write code that is **accessible, performant, type-safe, and maintainable**. Focus on clarity and explicit intent over brevity.
+## Architecture
 
-### Type Safety & Explicitness
+### Data Flow (Speech to Canvas)
 
-- Use explicit types for function parameters and return values when they enhance clarity
-- Prefer `unknown` over `any` when the type is genuinely unknown
-- Use const assertions (`as const`) for immutable values and literal types
-- Leverage TypeScript's type narrowing instead of type assertions
-- Use meaningful variable names instead of magic numbers - extract constants with descriptive names
+```
+User Speech
+  → Web Speech API (browser SpeechRecognition)
+  → Recognition text
+  → [PR5 — LLM] or [PR3/4 — Regex] instruction parser
+  → JSON Instruction[] (DrawShape | SetStyle | CanvasControl)
+  → [PR6] executeInstructions() in Zustand store
+  → shapes[] update + history snapshot
+  → react-konva Layer re-renders shapes
+```
 
-### Modern JavaScript/TypeScript
+### Abstract Coordinate System (0–1000)
 
-- Use arrow functions for callbacks and short functions
-- Prefer `for...of` loops over `.forEach()` and indexed `for` loops
-- Use optional chaining (`?.`) and nullish coalescing (`??`) for safer property access
-- Prefer template literals over string concatenation
-- Use destructuring for object and array assignments
-- Use `const` by default, `let` only when reassignment is needed, never `var`
+Drawings use an abstract 0–1000 space so LLMs don't need to know pixel dimensions. The store's `executeInstructions` maps abstract coords to actual canvas pixels at runtime via `abstractToPixel(value, canvasPixelSize) = Math.round((value / 1000) * canvasPixelSize)`.
 
-### Async & Promises
+Supported position types:
+- **Named anchors** — 9-grid: `"top-left"`, `"center"`, `"bottom-right"`, etc. (see `ANCHOR_MAP` in `src/types/drawing.ts`)
+- **Exact coordinates** — `{ x: 500, y: 500 }`
+- **Relative** — `{ relativeTo: "last", dx: 150, dy: 0 }`
 
-- Always `await` promises in async functions - don't forget to use the return value
-- Use `async/await` syntax instead of promise chains for better readability
-- Handle errors appropriately in async code with try-catch blocks
-- Don't use async functions as Promise executors
+Size presets: `small` = 100, `medium` = 200 (default), `large` = 400.
 
-### React & JSX
+### Instruction Type System (`src/types/drawing.ts`)
 
-- Use function components over class components
-- Call hooks at the top level only, never conditionally
-- Specify all dependencies in hook dependency arrays correctly
-- Use the `key` prop for elements in iterables (prefer unique IDs over array indices)
-- Nest children between opening and closing tags instead of passing as props
-- Don't define components inside other components
-- Use semantic HTML and ARIA attributes for accessibility:
-  - Provide meaningful alt text for images
-  - Use proper heading hierarchy
-  - Add labels for form inputs
-  - Include keyboard event handlers alongside mouse events
-  - Use semantic elements (`<button>`, `<nav>`, etc.) instead of divs with roles
+Three instruction actions:
+- **`draw`** — shape kind (`rectangle` | `circle` | `ellipse` | `line` | `triangle`), location, size/color/stroke
+- **`set-style`** — change `color`, `stroke-width`, or `fill` for subsequent draws
+- **Canvas controls** — `clear`, `undo`, `redo`, `toggle-grid`
 
-### Error Handling & Debugging
+### State Management (`src/store/use-drawing-store.ts`)
 
-- Remove `console.log`, `debugger`, and `alert` statements from production code
-- Throw `Error` objects with descriptive messages, not strings or other values
-- Use `try-catch` blocks meaningfully - don't catch errors just to rethrow them
-- Prefer early returns over nested conditionals for error cases
+Zustand store with snapshot-based undo/redo:
+- `shapes: Shape[]` — current canvas shapes (Konva-ready objects)
+- `history: Shape[][]` — full state snapshots, `historyIndex` tracks current position
+- `commands: Command[]` — text log of voice commands for side panel
+- `currentColor`, `currentStrokeWidth` — drawing context defaults
+- `showGrid` — toggle coordinate grid overlay
+- `executeInstructions(instructions: Instruction[])` — PR6 core entry point
 
-### Code Organization
+### Project Structure
 
-- Keep functions focused and under reasonable cognitive complexity limits
-- Extract complex conditions into well-named boolean variables
-- Use early returns to reduce nesting
-- Prefer simple conditionals over nested ternary operators
-- Group related code together and separate concerns
+```
+src/
+├── app/                    # Next.js App Router pages
+│   ├── layout.tsx          # Root layout: fonts, ThemeProvider (next-themes)
+│   └── page.tsx            # Home page: header + canvas + sidebar + toolbar
+├── components/
+│   ├── drawing-canvas.tsx  # react-konva Stage + Layer (measures container, renders shapes)
+│   ├── layout/
+│   │   ├── header.tsx             # Logo + theme toggle
+│   │   ├── bottom-toolbar.tsx     # Color presets, stroke slider, grid/undo/redo/clear
+│   │   ├── command-history.tsx    # Right sidebar — logged voice commands
+│   │   ├── coordinate-grid.tsx    # SVG overlay — abstract coord grid (100-unit intervals)
+│   │   └── voice-wave-indicator.tsx  # Mic status with animated bars
+│   └── ui/                 # shadcn/ui primitives (button, slider, card, switch, sonner)
+├── store/
+│   └── use-drawing-store.ts # Zustand store: shapes, history, commands, executeInstructions
+├── lib/
+│   └── utils.ts            # cn() — clsx + tailwind-merge
+└── types/
+    └── drawing.ts          # Instruction types, ANCHOR_MAP, SIZE_MAP
+docs/
+├── 技术方案.md             # Architecture design doc
+├── 绘图指令体系.md          # JSON instruction protocol spec (A/B team contract)
+├── 任务划分.md              # PR plan & team division
+├── 项目要求.md              # Competition rules
+└── 任务划分-队员A.md / 队员B.md  # Per-member task breakdowns
+```
 
-### Security
+## PR Planning
 
-- Add `rel="noopener"` when using `target="_blank"` on links
-- Avoid `dangerouslySetInnerHTML` unless absolutely necessary
-- Don't use `eval()` or assign directly to `document.cookie`
-- Validate and sanitize user input
+The project is built incrementally via PRs. Current progress matches `docs/任务划分.md`:
 
-### Performance
+| PR | What | Status |
+|----|------|--------|
+| PR0 | Project init | ❌ |
+| PR1 | Mic + Web Speech | ❌ |
+| PR2 | react-konva canvas | ❌ |
+| PR3 | Basic shape regex | ❌ |
+| PR4 | Style regex | ❌ |
+| PR4.5 | shadcn/ui toolbar | ❌ |
+| PR5 | LLM integration | ❌ |
+| **PR6** | **JSON instruction executor + coordinate grid** | **Active (branch: `feat/b-canvas`)** |
+| PR7 | Hybrid mode + fallback | ❌ |
+| PR8 | Export + polish + demo | ❌ |
 
-- Avoid spread syntax in accumulators within loops
-- Use top-level regex literals instead of creating them in loops
-- Prefer specific imports over namespace imports
-- Avoid barrel files (index files that re-export everything)
-- Use proper image components (e.g., Next.js `<Image>`) over `<img>` tags
+## Team Roles
 
-### Framework-Specific Guidance
+- **Member A**: Speech interaction + LLM integration (Web Speech API, GPT-4o-mini calls, instruction routing)
+- **Member B**: Drawing engine + UI (react-konva canvas, shadcn/ui components, Zustand state, coordinate grid)
 
-**Next.js:**
-- Use Next.js `<Image>` component for images
-- Use `next/head` or App Router metadata API for head elements
-- Use Server Components for async data fetching instead of async Client Components
+The JSON instruction protocol in `src/types/drawing.ts` and `docs/绘图指令体系.md` is the A/B joint contract — LLM output format matches what `executeInstructions()` consumes.
 
-**React 19+:**
-- Use ref as a prop instead of `React.forwardRef`
+## Key Caveats
 
-**Solid/Svelte/Vue/Qwik:**
-- Use `class` and `for` attributes (not `className` or `htmlFor`)
-
----
-
-## Testing
-
-- Write assertions inside `it()` or `test()` blocks
-- Avoid done callbacks in async tests - use async/await instead
-- Don't use `.only` or `.skip` in committed code
-- Keep test suites reasonably flat - avoid excessive `describe` nesting
-
-## When Biome Can't Help
-
-Biome's linter will catch most issues automatically. Focus your attention on:
-
-1. **Business logic correctness** - Biome can't validate your algorithms
-2. **Meaningful naming** - Use descriptive names for functions, variables, and types
-3. **Architecture decisions** - Component structure, data flow, and API design
-4. **Edge cases** - Handle boundary conditions and error states
-5. **User experience** - Accessibility, performance, and usability considerations
-6. **Documentation** - Add comments for complex logic, but prefer self-documenting code
-
----
-
-Most formatting and common issues are automatically fixed by Biome. Run `bun x ultracite fix` before committing to ensure compliance.
+- **Web Speech API** requires HTTPS or localhost (Chrome). No other browser is targeted.
+- **No test framework** is set up yet — the project currently has no tests.
+- `.env.local.example` exists but no `.env.local` is committed — LLM API key is optional (regex mode works without it).
+- The Konva `Shape` type in the store is NOT the `Instruction` type — `executeInstructions` converts `Instruction[]` to Konva-friendly `Shape` objects.
