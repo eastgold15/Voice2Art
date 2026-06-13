@@ -70,6 +70,7 @@ function abstractToPixel(value: number, canvasSize: number): number {
 // ===================== Store 定义 =====================
 
 interface DrawingStore {
+  _exportPngHandler: (() => void) | null;
   addCommand: (text: string) => void;
   addShape: (shape: Shape) => void;
   canvasHeight: number;
@@ -80,10 +81,12 @@ interface DrawingStore {
   currentColor: string;
   currentStrokeWidth: number;
   executeInstructions: (instructions: Instruction[]) => void;
+  exportPng: () => void;
   history: Shape[][];
   historyIndex: number;
   isListening: boolean;
   redo: () => void;
+  registerExportPng: (handler: () => void) => void;
   setCanvasSize: (w: number, h: number) => void;
   setColor: (color: string) => void;
   setListening: (v: boolean) => void;
@@ -321,6 +324,7 @@ function applyStyle(
 
 export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // === 状态 ===
+  _exportPngHandler: null,
   canvasHeight: 600,
   canvasWidth: 800,
   commands: [],
@@ -404,6 +408,10 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
 
   setListening: (v) => set({ isListening: v }),
+
+  registerExportPng: (handler) => set({ _exportPngHandler: handler }),
+
+  exportPng: () => get()._exportPngHandler?.(),
 
   // === executeInstructions (PR6 核心) ===
 
