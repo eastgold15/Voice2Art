@@ -1,6 +1,8 @@
 {
   "dependencies": {
+    "@alicloud/pop-core": "^1.8.0",
     "@base-ui/react": "^1.5.0",
+    "alibabacloud-nls": "^1.0.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "konva": "^10.3.0",

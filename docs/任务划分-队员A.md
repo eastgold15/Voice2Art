@@ -100,27 +100,68 @@ export function useVoice() {
 **目标：** 语音说"画直线"后对应图形出现在画布
 **分支名：** `feat/a-command-parser`
 
-### □ 3.1 定义 DrawInstruction 类型
+### □ 3.1 了解已定义的类型（队员 B 在 PR6 已创建）
 
-**与队员 B 确认类型一致后再实施！**
+**`src/types/drawing.ts` 已由队员 B 在 PR6 创建**，定义了完整的 JSON 指令类型体系。你不需要重新定义类型，直接 import 使用即可。
 
-建文件 `src/types/drawing.ts`：
+核心类型速览：
 
 ```typescript
-export interface DrawInstruction {
-  type: 'rect' | 'circle' | 'line';
-  color?: string;
+// 坐标（抽象 0-1000）
+export interface Position { x: number; y: number; }
+
+// 位置指定（九宫格 | 坐标 | 相对定位）
+export type Location =
+  | "top-left" | "top-center" | "top-right"
+  | "center-left" | "center" | "center-right"
+  | "bottom-left" | "bottom-center" | "bottom-right"
+  | Position
+  | { relativeTo: "last"; dx: number; dy: number };
+
+// 形状类型
+export type ShapeKind = "rectangle" | "circle" | "line" | "ellipse" | "triangle";
+
+// 尺寸
+export type Size = "small" | "medium" | "large";
+
+// ---- 三个核心指令类型（action 区分）----
+
+// 画图形
+export interface DrawShape {
+  action: "draw";
+  shape: ShapeKind;           // 必填
+  at?: Location;              // 起点，默认居中
+  to?: Location;              // 终点（仅 line）
+  color?: string;             // 描边色
+  fill?: string;              // 填充色
+  size?: Size;                // 预设尺寸
+  width?: number;             // 精确宽（覆盖 size）
+  height?: number;            // 精确高（覆盖 size）
+  radius?: number;            // circle 专用
   strokeWidth?: number;
-  size?: 'small' | 'medium' | 'large';
-  position?:
-    | { x: number; y: number }
-    | 'center'
-    | 'leftOfPrevious'
-    | 'rightOfPrevious';
 }
+
+// 改样式（不画图，改后续默认值）
+export interface SetStyle {
+  action: "set-style";
+  style: "color" | "stroke-width" | "fill";
+  value: string | number;
+}
+
+// 画布控制
+export interface CanvasControl {
+  action: "clear" | "undo" | "redo" | "toggle-grid";
+}
+
+// 顶层联合类型
+export type Instruction = DrawShape | SetStyle | CanvasControl;
+
+// 内置映射表
+export const ANCHOR_MAP: Record<string, Position>; // 九宫格 → 坐标
+export const SIZE_MAP: Record<Size, number>;        // small→100, medium→200, large→400
 ```
 
-> ⚠️ 这个类型是 A/B 协作的接口约定，与 B 确认后再提交。B 在 PR6 也会引用这个类型。
+> ⚠️ 你的正则匹配器/LLM 解析器的输出应该是 `DrawShape[]`（画图形）、`SetStyle`（改样式）、`CanvasControl`（画布操作）这三种类型。
 
 ### □ 3.2 创建正则匹配器
 
@@ -128,27 +169,37 @@ export interface DrawInstruction {
 
 ```typescript
 // 正则匹配规则
-// 将语音文本 → DrawInstruction[]
+// 将语音文本 → DrawShape[] | SetStyle | CanvasControl
 
-export type MatchResult = {
-  type: 'draw' | 'style' | 'action';
-  instructions: DrawInstruction[];
-  rawText: string;
-};
+import type { DrawShape, SetStyle, CanvasControl, ShapeKind, Size } from '@/types/drawing';
+
+export type RegexResult =
+  | { type: 'draw'; instructions: DrawShape[]; rawText: string }
+  | { type: 'style'; instruction: SetStyle; rawText: string }
+  | { type: 'action'; instruction: CanvasControl; rawText: string };
 
 // 正则规则（按优先级排序）：
 // 1. 画圆形： /画(.*?)(大圆|小圆|圆|圈|圆形)/
+//    → { action: "draw", shape: "circle", ... }
 // 2. 画矩形： /画(.*?)(正方|长方|方框|矩形|方块)/
+//    → { action: "draw", shape: "rectangle", ... }
 // 3. 画直线： /画(.*?)(直线|线|线条)/
-// 4. 提取颜色： /(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)/
-// 5. 提取尺寸： /(大|中|小)/
-// 6. 位置关系： /(左边|右边|上面|下面|中间|中心)/
+//    → { action: "draw", shape: "line", ... }
+// 4. 画三角形： /画(.*?)(三角|三角形)/
+//    → { action: "draw", shape: "triangle", ... }
+// 5. 画椭圆： /画(.*?)(椭[圆]|椭圆)/
+//    → { action: "draw", shape: "ellipse", ... }
+// 6. 提取颜色： /(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)/
+//    → 填入 color 字段
+// 7. 提取尺寸： /(大|中|小)/
+//    → 填入 size 字段（大→"large", 中→"medium", 小→"small"）
+// 8. 位置关系： /(左边|右边|上面|下面|中间|中心)/
+//    → 填入 at 字段（使用 Location 的九宫格值或相对定位）
 
-export function matchCommand(text: string): MatchResult | null {
+export function matchCommand(text: string): RegexResult | null {
   // 遍历规则，第一个匹配的返回
-  // 颜色映射：红→#FF0000, 蓝→#0000FF, ...
-  // 尺寸映射：大→large, 中→medium, 小→small
-  // 位置映射：中间→center, 左边→leftOfPrevious, 右边→rightOfPrevious
+  // 颜色映射：红→#EF4444, 蓝→#3B82F6, ...
+  // 输出 DrawShape 对象，action 固定为 "draw"
 }
 ```
 
@@ -171,20 +222,19 @@ const COLOR_MAP: Record<string, string> = {
 // 当前阶段仅实现正则路径
 
 import { matchCommand } from './regex-matcher';
+import type { DrawShape, SetStyle, CanvasControl } from '@/types/drawing';
 // import { parseWithLLM } from './llm-parser';  // PR5 再解开
 
-export function routeCommand(text: string): DrawInstruction[] | null {
-  // 1. 尝试正则匹配
-  const regexResult = matchCommand(text);
-  if (regexResult) {
-    return regexResult.instructions;
-  }
+export type RouteResult =
+  | { type: 'draw'; instructions: DrawShape[]; rawText: string }
+  | { type: 'style'; instruction: SetStyle; rawText: string }
+  | { type: 'action'; instruction: CanvasControl; rawText: string };
 
-  // 2. 正则匹配失败 → 走 LLM（PR5 再启用）
-  // return await parseWithLLM(text);
-
-  // 3. 都失败 → 返回 null（调用方处理）
-  return null;
+export function routeCommand(text: string): RouteResult | null {
+  const result = matchCommand(text);
+  if (!result) return null;
+  return result;
+  // 后续 PR5 在 matchCommand 返回 null 时走 LLM
 }
 ```
 
@@ -194,18 +244,28 @@ export function routeCommand(text: string): DrawInstruction[] | null {
 
 当收到 `final` 识别结果时：
 1. 调用 `routeCommand(text)`
-2. 如果有匹配 → 调用 `useDrawingStore.getState().addShape(shape)` 并记录指令
+2. 如果有匹配 → 按类型分发处理（draw / style / action）
 3. 如果无匹配 → 用 sonner Toast 提示"无法识别的指令，请重说"
 
 ```typescript
 // 伪代码
 if (event.type === 'final') {
-  const instructions = routeCommand(event.text);
-  if (instructions) {
+  const result = routeCommand(event.text);
+  if (result) {
     const store = useDrawingStore.getState();
-    store.recordCommand(event.text); // 需要 store 有 recordCommand
-    for (const ins of instructions) {
-      store.addShape(convertToShape(ins));
+    store.recordCommand(event.text);
+    switch (result.type) {
+      case 'draw':
+        for (const shape of result.instructions) {
+          store.addShape(shape); // shape 本身就是 DrawShape，store 直接消费
+        }
+        break;
+      case 'style':
+        store.applyStyle(result.instruction); // SetStyle
+        break;
+      case 'action':
+        store.executeAction(result.instruction); // CanvasControl
+        break;
     }
   } else {
     toast.error('无法识别的指令，请尝试说"画红色大圆"');
@@ -233,59 +293,63 @@ if (event.type === 'final') {
 
 ### □ 4.1 扩展 regex-matcher，增加样式/动作指令
 
-在 `regex-matcher.ts` 中追加规则：
+在 `regex-matcher.ts` 中追加规则，输出 `SetStyle` 或 `CanvasControl`：
 
-**颜色切换（不画图，只改 currentColor）：**
+**颜色切换（不画图，只改 currentColor）→ SetStyle：**
 ```
 /^(?:改成?|用|换[成]?)?(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)(?:色|颜色)?$/
 ```
-→ 返回 `{ type: 'style', action: 'setColor', value: '#FF0000' }`
+→ 返回 `{ type: 'style', instruction: { action: "set-style", style: "color", value: "#EF4444" } }`
 
-**粗细切换：**
+**粗细切换 → SetStyle：**
 ```
 /粗细?(\d{1,2})/
 /笔画?粗细?(\d{1,2})/
 /线条?粗细?(\d{1,2})/
 ```
-→ 返回 `{ type: 'style', action: 'setStrokeWidth', value: 5 }`
+→ 返回 `{ type: 'style', instruction: { action: "set-style", style: "stroke-width", value: 5 } }`
 
-**清空画布：**
+**填充色切换 → SetStyle：**
+```
+/填充(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)/
+```
+→ 返回 `{ type: 'style', instruction: { action: "set-style", style: "fill", value: "#EF4444" } }`
+
+**清空画布 → CanvasControl：**
 ```
 /清空|清除|删除所有|全部删掉|清屏/
 ```
-→ 触发 `clearCanvas()`
+→ 返回 `{ type: 'action', instruction: { action: "clear" } }`
 
-**撤销：**
+**撤销 → CanvasControl：**
 ```
 /撤销|回退|上一步|取消/
 ```
-→ 触发 `undo()`
+→ 返回 `{ type: 'action', instruction: { action: "undo" } }`
 
-**重做：**
+**重做 → CanvasControl：**
 ```
 /重做|恢复|下一步/
 ```
-→ 触发 `redo()`
+→ 返回 `{ type: 'action', instruction: { action: "redo" } }`
 
-### □ 4.2 扩展路由以支持样式指令
+### □ 4.2 扩展路由以支持样式/动作指令
 
-修改 `command-router.ts`，对 `type: 'style'` 和 `type: 'action'` 走不同处理路径：
+修改 `command-router.ts`，对三种 result.type 分别透传：
 
 ```typescript
 export function routeCommand(text: string): RouteResult | null {
-  const matchResult = matchCommand(text);
-  if (!matchResult) return null;
+  const result = matchCommand(text);
+  if (!result) return null;
 
-  if (matchResult.type === 'draw') {
-    return { type: 'draw', instructions: matchResult.instructions };
+  switch (result.type) {
+    case 'draw':
+      return { type: 'draw', instructions: result.instructions, rawText: text };
+    case 'style':
+      return { type: 'style', instruction: result.instruction, rawText: text };
+    case 'action':
+      return { type: 'action', instruction: result.instruction, rawText: text };
   }
-  if (matchResult.type === 'style') {
-    return { type: 'style', action: matchResult.action, value: matchResult.value };
-  }
-  if (matchResult.type === 'action') {
-    return { type: 'action', action: matchResult.action };
-  }
-  return null;
 }
 ```
 
@@ -301,31 +365,30 @@ store.recordCommand(event.text);
 
 switch (result.type) {
   case 'draw':
-    for (const ins of result.instructions) {
-      store.addShape(convertToShape(ins));
+    for (const shape of result.instructions) {
+      store.addShape(shape);
     }
     break;
   case 'style':
-    if (result.action === 'setColor') store.setColor(result.value);
-    if (result.action === 'setStrokeWidth') store.setStrokeWidth(result.value);
+    // result.instruction 是 SetStyle，直接交给 store
+    store.applyStyle(result.instruction);
     break;
   case 'action':
-    if (result.action === 'clear') store.clearCanvas();
-    if (result.action === 'undo') store.undo();
-    if (result.action === 'redo') store.redo();
+    // result.instruction 是 CanvasControl，直接交给 store
+    store.executeAction(result.instruction);
     break;
 }
 ```
 
 ### □ 4.4 验证
 
-1. 先说"红色" → 工具栏颜色选中红色
+1. 先说"红色" → 工具栏颜色选中红色（SetStyle: style="color"）
 2. "画圆" → 出现红色圆形
-3. "粗细5" → 工具栏粗细滑块变到 5
-4. "画直线" → 出现粗细为 5 的黑色直线（等一下，颜色？说了红色后颜色应该还是红色…这里要注意 currentColor 和 stroke 的关系）
-5. "清空" → 画布清空
+3. "粗细5" → 工具栏粗细滑块变到 5（SetStyle: style="stroke-width"）
+4. "画直线" → 出现粗细为 5 的红色直线（currentColor + currentStrokeWidth 都被 SetStyle 改过）
+5. "清空" → 画布清空（CanvasControl: action="clear"）
 6. "画矩形" → 画一个矩形
-7. "撤销" → 矩形消失
+7. "撤销" → 矩形消失（CanvasControl: action="undo"）
 
 > 💡 提 PR 标题：`[PR4] feat: 实现正则匹配样式指令（颜色/粗细/清空/撤销/重做）`
 
@@ -342,10 +405,12 @@ switch (result.type) {
 建文件 `src/lib/llm-parser.ts`：
 
 ```typescript
-// LLM 解析器：将自然语言指令 → DrawInstruction[]
+// LLM 解析器：将自然语言指令 → DrawShape[]
 // 调用 Vercel Serverless Function
 
-export async function parseWithLLM(text: string): Promise<DrawInstruction[] | null> {
+import type { DrawShape } from '@/types/drawing';
+
+export async function parseWithLLM(text: string): Promise<DrawShape[] | null> {
   try {
     const response = await fetch('/api/parse-command', {
       method: 'POST',
@@ -354,7 +419,7 @@ export async function parseWithLLM(text: string): Promise<DrawInstruction[] | nu
     });
     if (!response.ok) return null;
     const data = await response.json();
-    return data.instructions as DrawInstruction[];
+    return data.instructions as DrawShape[];
   } catch (err) {
     console.error('LLM parse error:', err);
     return null;
@@ -370,44 +435,50 @@ export async function parseWithLLM(text: string): Promise<DrawInstruction[] | nu
 // Vercel Serverless Function
 // POST /api/parse-command
 // Body: { text: string }
-// Response: { instructions: DrawInstruction[] }
+// Response: { instructions: DrawShape[] }
 
 import { NextResponse } from 'next/server';
 
 const SYSTEM_PROMPT = `你是一个语音绘图指令解析器。
 用户通过语音描述绘图操作，你需要将其解析为 JSON 指令数组。
 
-JSON Schema:
+JSON Schema（DrawShape）:
 {
-  "type": "rect | circle | line",
-  "color"?: "hex颜色值，如 #FF0000",
-  "strokeWidth"?: 1-20,
-  "size"?: "small | medium | large",
-  "position"?:
-    | { "x": number, "y": number }
-    | "center"
-    | "leftOfPrevious"
-    | "rightOfPrevious"
+  "action": "draw",
+  "shape": "rectangle" | "circle" | "line" | "ellipse" | "triangle",
+  "at"?: "top-left" | "top-center" | "top-right" | "center-left" | "center" | "center-right" | "bottom-left" | "bottom-center" | "bottom-right" | { "x": number, "y": number } | { "relativeTo": "last", "dx": number, "dy": number },
+  "to"?: 同上（仅 line 使用，指定终点位置）,
+  "color"?: "hex颜色值，如 #EF4444",
+  "fill"?: "hex颜色值",
+  "size"?: "small" | "medium" | "large",
+  "width"?: number,
+  "height"?: number,
+  "radius"?: number（仅 circle）,
+  "strokeWidth"?: number
 }
 
 注意事项：
-- "画个圈"、"画圆" → circle
-- "画方"、"画矩形"、"画方块" → rect
-- "直线"、"画线" → line
-- 颜色未指定则填 null（前端用默认值）
+- 坐标系为抽象 0-1000，居中为 { "x": 500, "y": 500 }
+- "画个圈"、"画圆" → shape: "circle"
+- "画方"、"画矩形"、"画方块" → shape: "rectangle"
+- "直线"、"画线" → shape: "line"
+- "三角" → shape: "triangle"
+- "椭圆" → shape: "ellipse"
+- 颜色映射：红→#EF4444, 蓝→#3B82F6, 绿→#22C55E, 黄→#EAB308, 紫→#7C5CFC, 黑→#000000, 白→#FFFFFF, 橙→#F97316, 粉→#EC4899, 青→#06B6D4, 灰→#6B7280, 棕→#92400E
+- 颜色未指定则不填 color 字段（前端用默认值）
 - 多步指令返回数组（按顺序执行）
 - 如果指令无法解析，返回 { "error": "无法解析" }
 - 只返回 JSON，不要多余文字
 
 示例：
 输入："画一个红色大圆"
-输出：{"instructions":[{"type":"circle","color":"#FF0000","size":"large","position":"center"}]}
+输出：{"instructions":[{"action":"draw","shape":"circle","color":"#EF4444","size":"large","at":"center"}]}
 
 输入："在右边画一个蓝色小方块"
-输出：{"instructions":[{"type":"rect","color":"#0000FF","size":"small","position":"rightOfPrevious"}]}
+输出：{"instructions":[{"action":"draw","shape":"rectangle","color":"#3B82F6","size":"small","at":{"relativeTo":"last","dx":150,"dy":0}}]}
 
 输入："画一个红色大圆，然后在它右边画一个蓝色方块"
-输出：{"instructions":[{"type":"circle","color":"#FF0000","size":"large","position":"center"},{"type":"rect","color":"#0000FF","size":"medium","position":"rightOfPrevious"}]}`;
+输出：{"instructions":[{"action":"draw","shape":"circle","color":"#EF4444","size":"large","at":"center"},{"action":"draw","shape":"rectangle","color":"#3B82F6","size":"medium","at":{"relativeTo":"last","dx":200,"dy":0}}]}`;
 
 export async function POST(request: Request) {
   const { text } = await request.json();
@@ -466,18 +537,20 @@ OPENAI_API_KEY=
 取消 `llm-parser` 的注释，在正则匹配失败时调用 LLM：
 
 ```typescript
-export async function routeCommand(text: string): Promise<DrawInstruction[] | null> {
-  // 1. 先尝试正则（快速路径）
+import type { DrawShape, SetStyle, CanvasControl } from '@/types/drawing';
+
+export async function routeCommand(text: string): Promise<RouteResult | null> {
+  // 1. 先尝试正则（快速路径，含样式/动作指令）
   const regexResult = matchCommand(text);
-  if (regexResult && regexResult.type === 'draw') {
-    return regexResult.instructions;
+  if (regexResult) {
+    return regexResult;
   }
 
-  // 2. 正则匹配失败 → LLM
+  // 2. 正则匹配失败 → LLM（仅处理复杂画图形表达）
   try {
     const llmResult = await parseWithLLM(text);
     if (llmResult && llmResult.length > 0) {
-      return llmResult;
+      return { type: 'draw', instructions: llmResult, rawText: text };
     }
   } catch {
     // LLM 失败，静默降级
@@ -496,7 +569,7 @@ export async function routeCommand(text: string): Promise<DrawInstruction[] | nu
 3. 说"画三个绿色的中等大小的正方形排成一行" → 看到三个矩形
 4. 说"你好今天天气怎么样" → LLM 返回无法解析 → Toast 提示
 
-> 💡 提 PR 标题：`[PR5] feat: 集成 GPT-4o-mini 实现自然语言 → JSON 指令`
+> 💡 提 PR 标题：`[PR5] feat: 集成 GPT-4o-mini 实现自然语言 → DrawShape JSON 指令`
 
 ---
 
@@ -514,12 +587,12 @@ export async function routeCommand(text: string): Promise<DrawInstruction[] | nu
 语音文本
   │
   ├─ ① 正则匹配（毫秒级）
-  │   ├─ 基础图形 → DrawInstruction[]
-  │   ├─ 样式指令 → setColor/setStrokeWidth
-  │   └─ 动作指令 → clear/undo/redo
+  │   ├─ 基础图形 → DrawShape[]
+  │   ├─ 样式指令 → SetStyle
+  │   └─ 动作指令 → CanvasControl
   │
-  ├─ ② LLM 解析（1-2 秒）— 仅对未匹配的复杂指令
-  │   └─ DrawInstruction[]
+  ├─ ② LLM 解析（1-2 秒）— 仅对未匹配的复杂画图指令
+  │   └─ DrawShape[]
   │
   └─ ③ 都失败 → Toast "无法识别，
                      请尝试说"画红色大圆"或"在右边画一个蓝色方块""
@@ -529,10 +602,10 @@ export async function routeCommand(text: string): Promise<DrawInstruction[] | nu
 
 ### □ 7.2 指令历史记录
 
-检查 store 中是否已有 `addCommand` 方法（当前已有 `addCommand` 和 `recordCommand` 可能命名不一致）。
+检查 store 中是否已有 `addCommand` / `recordCommand` 方法。
 
 确保：
-- 每次语音指令执行（无论正则还是 LLM）都调用 `addCommand(text)`
+- 每次语音指令执行（无论正则还是 LLM）都调用 `recordCommand(text)`
 - CommandHistory 组件已展示列表（已有）
 - 每条指令显示时间、图形数量（已有）
 
@@ -542,20 +615,27 @@ export async function routeCommand(text: string): Promise<DrawInstruction[] | nu
 
 ```typescript
 // 在 CommandHistory 组件中，回放按钮点击时重新解析并执行
-const handleReplay = (cmdText: string) => {
+const handleReplay = async (cmdText: string) => {
   // 重新走一遍指令路由流程
-  const instructions = await routeCommand(cmdText);
-  if (instructions) {
-    const store = useDrawingStore.getState();
-    for (const ins of instructions) {
-      store.addShape(convertToShape(ins));
-    }
+  const result = await routeCommand(cmdText);
+  if (!result) return;
+
+  const store = useDrawingStore.getState();
+  switch (result.type) {
+    case 'draw':
+      for (const shape of result.instructions) {
+        store.addShape(shape);
+      }
+      break;
+    case 'style':
+      store.applyStyle(result.instruction);
+      break;
+    case 'action':
+      store.executeAction(result.instruction);
+      break;
   }
 };
 ```
-
-需要将 `handleReplay` 传递给 CommandHistory 组件：
-- 通过 props 或直接在组件内调用 router（推荐在组件内调用，保持简单）
 
 ### □ 7.4 Toast 错误提示
 
@@ -575,8 +655,8 @@ import { Toaster } from 'sonner';
 
 1. "画直线" → 毫秒级响应（正则）
 2. "画一个紫色大圆，然后在它下面画两个黄色小方块" → LLM 处理（1-2秒）
-3. "红色" → 毫秒级响应（正则，改颜色）
-4. "清空" → 毫秒级响应
+3. "红色" → 毫秒级响应（正则，SetStyle）
+4. "清空" → 毫秒级响应（CanvasControl）
 5. 说无意义的话 → Toast 提示
 6. 断开网络说复杂指令 → LLM 失败但正则仍然可用
 7. 点击指令历史的回放按钮 → 图形重新绘制
@@ -607,16 +687,19 @@ import { Toaster } from 'sonner';
 
 | 指令类型 | 示例 | 支持情况 | 实现方式 |
 |----------|------|----------|----------|
-| 画圆形 | "画圆"、"画个圈" | ✅ | 正则 |
-| 画矩形 | "画方块"、"画矩形" | ✅ | 正则 |
-| 画直线 | "画直线" | ✅ | 正则 |
-| 改颜色 | "红色"、"改成蓝色" | ✅ | 正则 |
-| 改粗细 | "粗细5" | ✅ | 正则 |
-| 清空 | "清空"、"删除所有" | ✅ | 正则 |
-| 撤销 | "撤销"、"回退" | ✅ | 正则 |
-| 重做 | "重做"、"恢复" | ✅ | 正则 |
-| 组合指令 | "画红色大圆，右边画蓝色方块" | ✅ | LLM |
-| 语义容错 | "画个圈"、"弄个方块" | ✅ | LLM |
+| 画圆形 | "画圆"、"画个圈" → DrawShape(action="draw", shape="circle") | ✅ | 正则 |
+| 画矩形 | "画方块"、"画矩形" → DrawShape(action="draw", shape="rectangle") | ✅ | 正则 |
+| 画直线 | "画直线" → DrawShape(action="draw", shape="line") | ✅ | 正则 |
+| 画三角形 | "画三角" → DrawShape(action="draw", shape="triangle") | ✅ | 正则 |
+| 画椭圆 | "画椭圆" → DrawShape(action="draw", shape="ellipse") | ✅ | 正则 |
+| 改颜色 | "红色"、"改成蓝色" → SetStyle(style="color") | ✅ | 正则 |
+| 改粗细 | "粗细5" → SetStyle(style="stroke-width") | ✅ | 正则 |
+| 改填充 | "填充红色" → SetStyle(style="fill") | ✅ | 正则 |
+| 清空 | "清空"、"删除所有" → CanvasControl(action="clear") | ✅ | 正则 |
+| 撤销 | "撤销"、"回退" → CanvasControl(action="undo") | ✅ | 正则 |
+| 重做 | "重做"、"恢复" → CanvasControl(action="redo") | ✅ | 正则 |
+| 组合指令 | "画红色大圆，右边画蓝色方块" → DrawShape[] | ✅ | LLM |
+| 语义容错 | "画个圈"、"弄个方块" → DrawShape[] | ✅ | LLM |
 | 指令回放 | 点击历史记录重新执行 | ✅ | 路由 |
 | 导出 PNG | 点击导出按钮 | ❌ | 队员 B 负责 |
 ```
@@ -640,13 +723,18 @@ import { Toaster } from 'sonner';
 | 顺序 | 分支名 | 做什么 | 主要文件 |
 |------|--------|--------|---------|
 | ① | `feat/a-voice` | Web Speech API 封装 + Hook | lib/speech-recognition, hooks/use-voice |
-| ② | `feat/a-command-parser` | 正则匹配基础图形/样式指令 | lib/regex-matcher, lib/command-router, types/drawing |
-| ③ | `feat/a-llm` | LLM 集成 | lib/llm-parser, app/api/parse-command/route.ts, .env.local |
+| ② | `feat/a-command-parser` | 正则匹配基础图形/样式指令（输出 DrawShape / SetStyle / CanvasControl） | lib/regex-matcher, lib/command-router |
+| ③ | `feat/a-llm` | LLM 集成（输出 DrawShape[]） | lib/llm-parser, app/api/parse-command/route.ts, .env.local |
 | ④ | `feat/a-hybrid` | 混合模式 + 回放 + 降级 | 修改 command-router + CommandHistory + 加 Toaster |
 | ⑤ | `feat/a-polish` | 设计文档 + Demo 协助 | docs/技术方案.md, readme.md |
 
 > **重要提示：**
 > 1. 每完成一个阶段，去 GitHub 提 PR → 等 B review → squash merge → 切回 main 拉最新 → 切下一个分支
 > 2. PR3 和 PR4 可以合并到一个分支一次提 PR（都是正则匹配），也可以分开提（粒度更细）
-> 3. PR3 和 PR4 涉及公共类型 `DrawInstruction`，务必先与 B 确认类型定义一致
+> 3. **类型文件 `src/types/drawing.ts` 已由队员 B 在 PR6 创建**，你只需要 import 使用，不要重复定义。核心类型：
+>    - `DrawShape` — 画图形（action: "draw"）
+>    - `SetStyle` — 改样式（action: "set-style"）
+>    - `CanvasControl` — 画布操作（action: "clear" | "undo" | "redo" | "toggle-grid"）
+>    - `Location` — 位置（九宫格 / 坐标 / 相对定位）
 > 4. LLM 相关代码不要暴露 API Key：API 调用放在 Serverless Function 中，前端只调用 `/api/parse-command`
+> 5. 正则匹配器输出的对象必须直接符合 `DrawShape` / `SetStyle` / `CanvasControl` 接口，这样 store 可以直接消费，不需要中间转换层

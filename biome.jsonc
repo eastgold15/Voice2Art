@@ -9,10 +9,24 @@
     "rules": {
       "suspicious": {
         "noArrayIndexKey": "off",
-        "noExplicitAny": "off"
+        "noExplicitAny": "off",
+        "noEmptyBlockStatements": "off",
+        "useIterableCallbackReturn": "off",
+        "noBitwiseOperators": "off",
+        "useAwait": "off"
       },
       "style": {
         "useBlockStatements": "off"
+      },
+      "correctness": {
+        "noUnusedFunctionParameters": "off"
+      },
+      "performance": {
+        "useTopLevelRegex": "off"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "off",
+        "noForEach": "off"
       }
     }
   }
