@@ -158,7 +158,9 @@ function createRealtimeService(): SpeechService {
         recorder = new PcmRecorder();
         await recorder.start((chunk) => {
           if (ws?.readyState === WebSocket.OPEN && started) {
-            ws.send(chunk.buffer);
+            // chunk.buffer 的类型是 ArrayBufferLike（包含 SharedArrayBuffer），
+            // 但实际运行时永远是 ArrayBuffer（postMessage 传输），断言即可。
+            ws.send(chunk.buffer as ArrayBuffer);
           }
         });
         console.log("[Voice] 录音已启动");
