@@ -25,6 +25,8 @@ export interface Shape {
   radiusY?: number;
   stroke: string;
   strokeWidth: number;
+  /** Konva Line tension，画笔路径平滑用 */
+  tension?: number;
   type: "rect" | "circle" | "ellipse" | "line";
   width?: number;
   x: number;
@@ -95,6 +97,12 @@ interface DrawingStore {
   isListening: boolean;
   /** 上一个绘图形状的中心位置（抽象坐标），支持跨 executeInstructions 调用的相对定位 */
   lastPosition: Position | null;
+  /** 画笔颜色 */
+  penColor: string;
+  /** 画笔当前所在位置（抽象坐标 0-1000） */
+  penPosition: Position;
+  /** 画笔粗细 */
+  penWidth: number;
   redo: () => void;
   registerExportPng: (handler: () => void) => void;
   setCanvasSize: (w: number, h: number) => void;
@@ -373,9 +381,11 @@ export function getCanvasContext(): CanvasContext {
         return `#${idx} 椭圆 中心=(${cx},${cy}) 半径X=${rx} 半径Y=${ry} 颜色=${s.stroke}`;
       }
       case "line": {
-        // 三个顶点且 closed → 三角形
         const pts = s.points;
-        if (s.closed && pts && pts.length === 6) {
+        if (!pts || pts.length < 2) return `#${idx} 直线`;
+
+        // 三个顶点且 closed → 三角形
+        if (s.closed && pts.length === 6) {
           const cx = Math.round(
             ((pts[0] + pts[2] + pts[4]) / 3 / canvasWidth) * 1000
           );
@@ -384,7 +394,28 @@ export function getCanvasContext(): CanvasContext {
           );
           return `#${idx} 三角形 中心≈(${cx},${cy}) 颜色=${s.stroke}`;
         }
-        return `#${idx} 直线`;
+
+        // 复杂路径（≥6 个数字，即 ≥3 个点）→ 归约为边界框
+        if (pts.length >= 6) {
+          const xs = pts.filter((_, i) => i % 2 === 0);
+          const ys = pts.filter((_, i) => i % 2 === 1);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          const cx = Math.round(((minX + maxX) / 2 / canvasWidth) * 1000);
+          const cy = Math.round(((minY + maxY) / 2 / canvasHeight) * 1000);
+          const aw = Math.round(((maxX - minX) / canvasWidth) * 1000);
+          const ah = Math.round(((maxY - minY) / canvasHeight) * 1000);
+          return `#${idx} 曲线 区域≈中心=(${cx},${cy}) 宽≈${aw} 高≈${ah} 颜色=${s.stroke}`;
+        }
+
+        // 简单直线（2 个点）
+        const x1 = Math.round((pts[0] / canvasWidth) * 1000);
+        const y1 = Math.round((pts[1] / canvasHeight) * 1000);
+        const x2 = Math.round((pts[2] / canvasWidth) * 1000);
+        const y2 = Math.round((pts[3] / canvasHeight) * 1000);
+        return `#${idx} 直线 (${x1},${y1})→(${x2},${y2}) 颜色=${s.stroke}`;
       }
       default:
         return `#${idx} 未知形状`;
@@ -410,6 +441,9 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   historyIndex: 0,
   isListening: false,
   lastPosition: null,
+  penColor: "#000000",
+  penPosition: { x: 500, y: 500 },
+  penWidth: 3,
   shapes: [],
   showGrid: false,
   theme: "light",
@@ -494,8 +528,20 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // === executeInstructions (PR6 核心) ===
 
   executeInstructions: (instructions) => {
-    const { canvasWidth, canvasHeight, lastPosition } = get();
+    const {
+      canvasWidth,
+      canvasHeight,
+      lastPosition,
+      penPosition,
+      penColor,
+      penWidth,
+    } = get();
     let lastPos: Position | null = lastPosition;
+    let penDown = false;
+    let currentStrokePoints: number[] | null = null;
+    let currentPenPos = { ...penPosition };
+    let currentPenColor = penColor;
+    let currentPenWidth = penWidth;
     const insCtx = { canvasWidth, canvasHeight };
 
     for (const ins of instructions) {
@@ -529,12 +575,52 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
         case "toggle-grid":
           get().toggleGrid();
           break;
+        case "pen": {
+          if (ins.cmd === "move" && ins.at) {
+            currentPenPos = { x: ins.at.x, y: ins.at.y };
+            if (penDown && currentStrokePoints) {
+              const px = abstractToPixel(ins.at.x, canvasWidth);
+              const py = abstractToPixel(ins.at.y, canvasHeight);
+              currentStrokePoints.push(px, py);
+            }
+          } else if (ins.cmd === "down") {
+            penDown = true;
+            const px = abstractToPixel(currentPenPos.x, canvasWidth);
+            const py = abstractToPixel(currentPenPos.y, canvasHeight);
+            currentStrokePoints = [px, py];
+          } else if (ins.cmd === "up") {
+            if (currentStrokePoints && currentStrokePoints.length >= 4) {
+              get().addShape({
+                type: "line",
+                x: 0,
+                y: 0,
+                points: [...currentStrokePoints],
+                stroke: currentPenColor,
+                strokeWidth: currentPenWidth,
+                tension: 0.3,
+                closed: false,
+              });
+            }
+            penDown = false;
+            currentStrokePoints = null;
+          } else if (ins.cmd === "color") {
+            currentPenColor = ins.color ?? get().currentColor;
+          } else if (ins.cmd === "width") {
+            currentPenWidth = Number(ins.value ?? get().currentStrokeWidth);
+          }
+          break;
+        }
         default:
           break;
       }
     }
 
-    // 持久化 lastPos，下次 executeInstructions 调用可继续相对定位
-    set({ lastPosition: lastPos });
+    // 持久化状态
+    set({
+      lastPosition: lastPos,
+      penPosition: currentPenPos,
+      penColor: currentPenColor,
+      penWidth: currentPenWidth,
+    });
   },
 }));

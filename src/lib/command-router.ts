@@ -77,7 +77,7 @@ export async function routeCommandStream(
       } else if (
         ["clear", "undo", "redo", "toggle-grid"].includes(instruction.action)
       ) {
-        onAction?.(instruction);
+        onAction?.(instruction as CanvasControl);
       }
     });
   } finally {

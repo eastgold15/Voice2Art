@@ -3,6 +3,7 @@ import type {
   CanvasControl,
   DrawShape,
   Instruction,
+  PenInstruction,
   SetStyle,
 } from "@/types/drawing";
 
@@ -93,6 +94,10 @@ export async function parseWithLLMStream(
         } else if (["clear", "undo", "redo", "toggle-grid"].includes(action)) {
           console.log(`[LLM Stream] 收到 action → ${action}`);
           onInstruction(parsed as unknown as CanvasControl);
+          hasResult = true;
+        } else if (action === "pen") {
+          console.log(`[LLM Stream] 收到 pen → ${data.slice(0, 100)}`);
+          onInstruction(parsed as unknown as PenInstruction);
           hasResult = true;
         } else {
           console.warn("[LLM Stream] 未知 action:", action);

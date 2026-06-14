@@ -47,7 +47,7 @@ export type Size = "small" | "medium" | "large";
 
 // ---------- 指令联合体 ----------
 
-export type Instruction = DrawShape | SetStyle | CanvasControl;
+export type Instruction = DrawShape | SetStyle | CanvasControl | PenInstruction;
 
 // --- 画形状 ---
 
@@ -77,6 +77,22 @@ export interface SetStyle {
 
 export interface CanvasControl {
   action: "clear" | "undo" | "redo" | "toggle-grid";
+}
+
+// --- 画笔模式 ---
+
+export type PenCommand = "down" | "up" | "move" | "color" | "width";
+
+/** 画笔模式：模拟一支虚拟笔在画布上移动画线 */
+export interface PenInstruction {
+  action: "pen";
+  /** 目标位置（仅 move 需要），抽象坐标系 0-1000 */
+  at?: Position;
+  cmd: PenCommand;
+  /** 画笔颜色（仅 color 命令需要），hex 颜色值 */
+  color?: string;
+  /** 画笔粗细（仅 width 命令需要） */
+  value?: number;
 }
 
 // ---------- 内置尺寸映射 ----------
