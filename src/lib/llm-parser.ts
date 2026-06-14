@@ -1,3 +1,4 @@
+import { getCanvasContext } from "@/store/use-drawing-store";
 import type {
   CanvasControl,
   DrawShape,
@@ -30,10 +31,11 @@ export async function parseWithLLMStream(
 
   let res: Response;
   try {
+    const canvas = getCanvasContext();
     res = await fetch("/api/parse-command", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, canvas }),
     });
   } catch (err) {
     console.error("[LLM Stream] 网络异常:", err);

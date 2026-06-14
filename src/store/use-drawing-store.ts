@@ -332,6 +332,72 @@ function applyStyle(
   }
 }
 
+// ===================== 画布序列化（给 LLM 看） =====================
+
+export interface CanvasContext {
+  height: number;
+  /** 人类可读的图形描述，每行一个 */
+  shapeDescriptions: string[];
+  width: number;
+}
+
+/** 将当前画布上的图形序列化为 LLM 可读的描述文本 */
+export function getCanvasContext(): CanvasContext {
+  const { shapes, canvasWidth, canvasHeight } = useDrawingStore.getState();
+  const minDim = Math.min(canvasWidth, canvasHeight);
+
+  const descriptions = shapes.map((s, i) => {
+    const idx = i + 1;
+
+    switch (s.type) {
+      case "circle": {
+        const cx = Math.round((s.x / canvasWidth) * 1000);
+        const cy = Math.round((s.y / canvasHeight) * 1000);
+        const r = Math.round(((s.radius ?? 0) / minDim) * 1000);
+        return `#${idx} 圆形 中心=(${cx},${cy}) 半径=${r} 颜色=${s.stroke}`;
+      }
+      case "rect": {
+        const cw = s.width ?? 0;
+        const ch = s.height ?? 0;
+        const cx = Math.round(((s.x + cw / 2) / canvasWidth) * 1000);
+        const cy = Math.round(((s.y + ch / 2) / canvasHeight) * 1000);
+        const aw = Math.round((cw / canvasWidth) * 1000);
+        const ah = Math.round((ch / canvasHeight) * 1000);
+        return `#${idx} 矩形 中心=(${cx},${cy}) 宽=${aw} 高=${ah} 颜色=${s.stroke}`;
+      }
+      case "ellipse": {
+        const cx = Math.round((s.x / canvasWidth) * 1000);
+        const cy = Math.round((s.y / canvasHeight) * 1000);
+        const rx = Math.round(((s.radiusX ?? 0) / minDim) * 1000);
+        const ry = Math.round(((s.radiusY ?? 0) / minDim) * 1000);
+        return `#${idx} 椭圆 中心=(${cx},${cy}) 半径X=${rx} 半径Y=${ry} 颜色=${s.stroke}`;
+      }
+      case "line": {
+        // 三个顶点且 closed → 三角形
+        const pts = s.points;
+        if (s.closed && pts && pts.length === 6) {
+          const cx = Math.round(
+            ((pts[0] + pts[2] + pts[4]) / 3 / canvasWidth) * 1000
+          );
+          const cy = Math.round(
+            ((pts[1] + pts[3] + pts[5]) / 3 / canvasHeight) * 1000
+          );
+          return `#${idx} 三角形 中心≈(${cx},${cy}) 颜色=${s.stroke}`;
+        }
+        return `#${idx} 直线`;
+      }
+      default:
+        return `#${idx} 未知形状`;
+    }
+  });
+
+  return {
+    width: canvasWidth,
+    height: canvasHeight,
+    shapeDescriptions: descriptions,
+  };
+}
+
 export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // === 状态 ===
   _exportPngHandler: null,
