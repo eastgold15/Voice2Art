@@ -71,7 +71,7 @@ export type RegexResult =
 
 // ===================== 工具函数 =====================
 
-function extractColor(text: string): string | undefined {
+function _extractColor(text: string): string | undefined {
   for (const [name, hex] of Object.entries(COLOR_MAP)) {
     if (text.includes(name)) {
       return hex;
@@ -80,7 +80,7 @@ function extractColor(text: string): string | undefined {
   return;
 }
 
-function extractSize(text: string): Size | undefined {
+function _extractSize(text: string): Size | undefined {
   for (const [name, size] of Object.entries(SIZE_MAP_REGEX)) {
     if (text.includes(name)) {
       return size;
@@ -89,7 +89,7 @@ function extractSize(text: string): Size | undefined {
   return;
 }
 
-function extractPosition(text: string): Location | undefined {
+function _extractPosition(text: string): Location | undefined {
   for (const [name, loc] of Object.entries(POSITION_MAP)) {
     if (text.includes(name)) {
       return loc;
@@ -114,99 +114,13 @@ interface Rule {
 }
 
 const rules: Rule[] = [
-  // --- 画图形 ---
+  // 正则只负责样式/动作指令，画图全部交给 LLM
 
-  // 椭圆（必须在"圆"之前，避免"椭圆"被"圆"匹配）
-  {
-    pattern: /画(?:.*?)(椭圆)/,
-    handler: (text) => ({
-      type: "draw",
-      instructions: [
-        {
-          action: "draw",
-          shape: "ellipse",
-          color: extractColor(text),
-          size: extractSize(text),
-          at: extractPosition(text),
-        },
-      ],
-      rawText: text,
-    }),
-  },
-  // 圆形
-  {
-    pattern: /画(?:.*?)(大圆|小圆|圆|圈|圆形)/,
-    handler: (text) => ({
-      type: "draw",
-      instructions: [
-        {
-          action: "draw",
-          shape: "circle",
-          color: extractColor(text),
-          size: extractSize(text),
-          at: extractPosition(text),
-        },
-      ],
-      rawText: text,
-    }),
-  },
-  // 矩形
-  {
-    pattern: /画(?:.*?)(正方|长方|方框|矩形|方块)/,
-    handler: (text) => ({
-      type: "draw",
-      instructions: [
-        {
-          action: "draw",
-          shape: "rectangle",
-          color: extractColor(text),
-          size: extractSize(text),
-          at: extractPosition(text),
-        },
-      ],
-      rawText: text,
-    }),
-  },
-  // 三角形
-  {
-    pattern: /画(?:.*?)(三角|三角形)/,
-    handler: (text) => ({
-      type: "draw",
-      instructions: [
-        {
-          action: "draw",
-          shape: "triangle",
-          color: extractColor(text),
-          size: extractSize(text),
-          at: extractPosition(text),
-        },
-      ],
-      rawText: text,
-    }),
-  },
-  // 直线
-  {
-    pattern: /画(?:.*?)(直线|线|线条)/,
-    handler: (text) => ({
-      type: "draw",
-      instructions: [
-        {
-          action: "draw",
-          shape: "line",
-          color: extractColor(text),
-          size: extractSize(text),
-          at: extractPosition(text),
-        },
-      ],
-      rawText: text,
-    }),
-  },
+  // --- 样式指令 ---
 
-  // --- 样式指令（不画图，只改当前样式）---
-
-  // 填充色
+  // 填充色（支持 "填充红色" "填充成蓝色" "填充为绿色"）
   {
-    pattern: /填充(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)/,
+    pattern: /填充(?:成|为)?\s*(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)色?/,
     handler: (text, match) => ({
       type: "style",
       instruction: {
@@ -217,7 +131,10 @@ const rules: Rule[] = [
       rawText: text,
     }),
   },
-  // 颜色切换
+  // --- 颜色切换（三层递进，高容错） ---
+
+  // 第1层：显式动词 + 颜色（最高频，匹配文本中任意位置）
+  // 命中: "换成黄色" "改成红色" "切换成蓝色" "变成绿色" "变为紫色" "调成蓝" "设成红" "设置成黑" "换为白" "用红色"
   {
     pattern:
       /^(?:改成?|用|换成?|切换(?:成)?)?(红|黄|蓝|绿|紫|黑|白|橙|粉|青|灰|棕)(?:色|颜色)?$/,
@@ -285,7 +202,8 @@ const rules: Rule[] = [
 // ===================== 主入口 =====================
 
 export function matchCommand(text: string): RegexResult | null {
-  const cleaned = text.trim();
+  // 去掉首尾空白 + NLS 自动添加的标点（否则 "红色。" 无法匹配 ^...$）
+  const cleaned = text.trim().replace(/[。，、！？；：,.;:!?]+$/, "");
 
   for (const rule of rules) {
     const match = cleaned.match(rule.pattern);
@@ -315,6 +233,6 @@ export function matchCommand(text: string): RegexResult | null {
     }
   }
 
-  console.log(`[Router] 正则未匹配 ❌ | 输入:"${cleaned}" → 降级到 LLM`);
+  console.log(`[Router] 正则未命中 | "${cleaned}" → LLM`);
   return null;
 }
