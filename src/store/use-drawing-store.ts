@@ -25,6 +25,8 @@ export interface Shape {
   radiusY?: number;
   stroke: string;
   strokeWidth: number;
+  /** Konva Line tension，画笔路径平滑用 */
+  tension?: number;
   type: "rect" | "circle" | "ellipse" | "line";
   width?: number;
   x: number;
@@ -35,6 +37,8 @@ export interface Shape {
 
 export interface Command {
   id: string;
+  /** 执行前的 shapes 数量，用于回放时撤销 */
+  instructions: Instruction[] | null;
   shapeCount: number;
   text: string;
   timestamp: number;
@@ -56,15 +60,15 @@ function normalizeLocation(loc: unknown, lastPos: Position | null): Position {
 
     // { relativeTo: "last", dx, dy }
     if ("relativeTo" in obj && obj.relativeTo === "last" && lastPos) {
-      return {
+      return clampPosition({
         x: lastPos.x + ((obj.dx as number) ?? 0),
         y: lastPos.y + ((obj.dy as number) ?? 0),
-      };
+      });
     }
 
     // { x, y }
     if (typeof obj.x === "number" && typeof obj.y === "number") {
-      return { x: obj.x, y: obj.y };
+      return clampPosition({ x: obj.x, y: obj.y });
     }
   }
 
@@ -95,10 +99,23 @@ interface DrawingStore {
   isListening: boolean;
   /** 上一个绘图形状的中心位置（抽象坐标），支持跨 executeInstructions 调用的相对定位 */
   lastPosition: Position | null;
+  /** lastPosition 的历史快照，与 history/shapes 同步 */
+  lastPositionHistory: (Position | null)[];
+  /** 画笔颜色 */
+  penColor: string;
+  /** 画笔是否落下（跨 executeInstructions 持久化） */
+  penDown: boolean;
+  /** 画笔当前所在位置（抽象坐标 0-1000） */
+  penPosition: Position;
+  /** 当前笔画路径点（像素坐标，跨 executeInstructions 持久化） */
+  penStrokePoints: number[] | null;
+  /** 画笔粗细 */
+  penWidth: number;
   redo: () => void;
   registerExportPng: (handler: () => void) => void;
   setCanvasSize: (w: number, h: number) => void;
   setColor: (color: string) => void;
+  setLastCommandInstructions: (instructions: Instruction[]) => void;
   setListening: (v: boolean) => void;
   setStrokeWidth: (width: number) => void;
   shapes: Shape[];
@@ -373,9 +390,11 @@ export function getCanvasContext(): CanvasContext {
         return `#${idx} 椭圆 中心=(${cx},${cy}) 半径X=${rx} 半径Y=${ry} 颜色=${s.stroke}`;
       }
       case "line": {
-        // 三个顶点且 closed → 三角形
         const pts = s.points;
-        if (s.closed && pts && pts.length === 6) {
+        if (!pts || pts.length < 2) return `#${idx} 直线`;
+
+        // 三个顶点且 closed → 三角形
+        if (s.closed && pts.length === 6) {
           const cx = Math.round(
             ((pts[0] + pts[2] + pts[4]) / 3 / canvasWidth) * 1000
           );
@@ -384,7 +403,28 @@ export function getCanvasContext(): CanvasContext {
           );
           return `#${idx} 三角形 中心≈(${cx},${cy}) 颜色=${s.stroke}`;
         }
-        return `#${idx} 直线`;
+
+        // 复杂路径（≥6 个数字，即 ≥3 个点）→ 归约为边界框
+        if (pts.length >= 6) {
+          const xs = pts.filter((_, i) => i % 2 === 0);
+          const ys = pts.filter((_, i) => i % 2 === 1);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          const cx = Math.round(((minX + maxX) / 2 / canvasWidth) * 1000);
+          const cy = Math.round(((minY + maxY) / 2 / canvasHeight) * 1000);
+          const aw = Math.round(((maxX - minX) / canvasWidth) * 1000);
+          const ah = Math.round(((maxY - minY) / canvasHeight) * 1000);
+          return `#${idx} 曲线 区域≈中心=(${cx},${cy}) 宽≈${aw} 高≈${ah} 颜色=${s.stroke}`;
+        }
+
+        // 简单直线（2 个点）
+        const x1 = Math.round((pts[0] / canvasWidth) * 1000);
+        const y1 = Math.round((pts[1] / canvasHeight) * 1000);
+        const x2 = Math.round((pts[2] / canvasWidth) * 1000);
+        const y2 = Math.round((pts[3] / canvasHeight) * 1000);
+        return `#${idx} 直线 (${x1},${y1})→(${x2},${y2}) 颜色=${s.stroke}`;
       }
       default:
         return `#${idx} 未知形状`;
@@ -410,6 +450,12 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   historyIndex: 0,
   isListening: false,
   lastPosition: null,
+  lastPositionHistory: [null],
+  penColor: "#000000",
+  penDown: false,
+  penPosition: { x: 500, y: 500 },
+  penStrokePoints: null,
+  penWidth: 3,
   shapes: [],
   showGrid: false,
   theme: "light",
@@ -429,37 +475,60 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     }),
 
   addShape: (shape) => {
-    const newShapes = [...get().shapes, shape];
-    const newHistory = get().history.slice(0, get().historyIndex + 1);
+    const { shapes, history, historyIndex, lastPosition, lastPositionHistory } =
+      get();
+    const newShapes = [...shapes, shape];
+    const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newShapes);
+    const newLastPosHistory = lastPositionHistory.slice(0, historyIndex + 1);
+    newLastPosHistory.push(lastPosition);
     set({
       shapes: newShapes,
       history: newHistory,
       historyIndex: newHistory.length - 1,
+      lastPositionHistory: newLastPosHistory,
     });
   },
 
   clearCanvas: () => {
-    const newHistory = [...get().history.slice(0, get().historyIndex + 1), []];
+    const { history, historyIndex, lastPositionHistory } = get();
+    const newHistory = [...history.slice(0, historyIndex + 1), []];
+    const newLastPosHistory = [
+      ...lastPositionHistory.slice(0, historyIndex + 1),
+      null,
+    ];
     set({
       shapes: [],
       history: newHistory,
       historyIndex: newHistory.length - 1,
       lastPosition: null,
+      lastPositionHistory: newLastPosHistory,
+      penDown: false,
+      penStrokePoints: null,
     });
   },
 
   undo: () => {
-    if (get().historyIndex > 0) {
-      const newIndex = get().historyIndex - 1;
-      set({ shapes: get().history[newIndex], historyIndex: newIndex });
+    const { history, historyIndex, lastPositionHistory } = get();
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      set({
+        shapes: history[newIndex],
+        historyIndex: newIndex,
+        lastPosition: lastPositionHistory[newIndex],
+      });
     }
   },
 
   redo: () => {
-    if (get().historyIndex < get().history.length - 1) {
-      const newIndex = get().historyIndex + 1;
-      set({ shapes: get().history[newIndex], historyIndex: newIndex });
+    const { history, historyIndex, lastPositionHistory } = get();
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      set({
+        shapes: history[newIndex],
+        historyIndex: newIndex,
+        lastPosition: lastPositionHistory[newIndex],
+      });
     }
   },
 
@@ -470,12 +539,22 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
         ...get().commands,
         {
           id,
+          instructions: null,
           text,
           timestamp: Date.now(),
           shapeCount: get().shapes.length,
         },
       ],
     });
+  },
+
+  setLastCommandInstructions: (instructions) => {
+    const cmds = get().commands;
+    if (cmds.length === 0) return;
+    const idx = cmds.length - 1;
+    const updated = [...cmds];
+    updated[idx] = { ...updated[idx], instructions };
+    set({ commands: updated });
   },
 
   clearCommands: () => set({ commands: [] }),
@@ -494,8 +573,22 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // === executeInstructions (PR6 核心) ===
 
   executeInstructions: (instructions) => {
-    const { canvasWidth, canvasHeight, lastPosition } = get();
+    const {
+      canvasWidth,
+      canvasHeight,
+      lastPosition,
+      penPosition,
+      penColor,
+      penDown: storePenDown,
+      penStrokePoints: storePenStrokePoints,
+      penWidth,
+    } = get();
     let lastPos: Position | null = lastPosition;
+    let penDown = storePenDown;
+    let currentStrokePoints: number[] | null = storePenStrokePoints;
+    let currentPenPos = { ...penPosition };
+    let currentPenColor = penColor;
+    let currentPenWidth = penWidth;
     const insCtx = { canvasWidth, canvasHeight };
 
     for (const ins of instructions) {
@@ -529,12 +622,54 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
         case "toggle-grid":
           get().toggleGrid();
           break;
+        case "pen": {
+          if (ins.cmd === "move" && ins.at) {
+            currentPenPos = clampPosition({ x: ins.at.x, y: ins.at.y });
+            if (penDown && currentStrokePoints) {
+              const px = abstractToPixel(ins.at.x, canvasWidth);
+              const py = abstractToPixel(ins.at.y, canvasHeight);
+              currentStrokePoints.push(px, py);
+            }
+          } else if (ins.cmd === "down") {
+            penDown = true;
+            const px = abstractToPixel(currentPenPos.x, canvasWidth);
+            const py = abstractToPixel(currentPenPos.y, canvasHeight);
+            currentStrokePoints = [px, py];
+          } else if (ins.cmd === "up") {
+            if (currentStrokePoints && currentStrokePoints.length >= 4) {
+              get().addShape({
+                type: "line",
+                x: 0,
+                y: 0,
+                points: [...currentStrokePoints],
+                stroke: currentPenColor,
+                strokeWidth: currentPenWidth,
+                tension: 0.3,
+                closed: false,
+              });
+            }
+            penDown = false;
+            currentStrokePoints = null;
+          } else if (ins.cmd === "color") {
+            currentPenColor = ins.color ?? get().currentColor;
+          } else if (ins.cmd === "width") {
+            currentPenWidth = Number(ins.value ?? get().currentStrokeWidth);
+          }
+          break;
+        }
         default:
           break;
       }
     }
 
-    // 持久化 lastPos，下次 executeInstructions 调用可继续相对定位
-    set({ lastPosition: lastPos });
+    // 持久化状态
+    set({
+      lastPosition: lastPos,
+      penPosition: currentPenPos,
+      penColor: currentPenColor,
+      penDown,
+      penStrokePoints: currentStrokePoints,
+      penWidth: currentPenWidth,
+    });
   },
 }));

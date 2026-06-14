@@ -2,6 +2,7 @@ import type {
   CanvasControl,
   DrawShape,
   Instruction,
+  PenInstruction,
   SetStyle,
 } from "@/types/drawing";
 import { parseWithLLM, parseWithLLMStream } from "./llm-parser";
@@ -48,6 +49,7 @@ export async function routeCommandStream(
   onDraw: (instruction: DrawShape) => void,
   onStyle?: (instruction: SetStyle) => void,
   onAction?: (instruction: CanvasControl) => void,
+  onPen?: (instruction: PenInstruction) => void,
   onLlmStart?: () => void,
   onLlmEnd?: () => void
 ): Promise<boolean> {
@@ -77,7 +79,9 @@ export async function routeCommandStream(
       } else if (
         ["clear", "undo", "redo", "toggle-grid"].includes(instruction.action)
       ) {
-        onAction?.(instruction);
+        onAction?.(instruction as CanvasControl);
+      } else if (instruction.action === "pen") {
+        onPen?.(instruction);
       }
     });
   } finally {

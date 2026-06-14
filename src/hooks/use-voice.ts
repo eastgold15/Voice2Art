@@ -47,6 +47,9 @@ export function useVoice() {
         (canvasControl) => {
           buffer.push(canvasControl);
         },
+        (penInstruction) => {
+          buffer.push(penInstruction);
+        },
         // onLlmStart — LLM 开始流式调用
         () => {
           calledLlm = true;
@@ -66,6 +69,8 @@ export function useVoice() {
       // 有缓冲指令 → 逐条延迟执行（含 set-style 等非 draw 指令）
       if (buffer.length > 0) {
         await executeWithDelay(buffer);
+        // 存储指令供回放使用
+        useDrawingStore.getState().setLastCommandInstructions(buffer);
       } else if (!ok) {
         toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
       }

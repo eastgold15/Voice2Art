@@ -99,6 +99,7 @@ export default function DrawingCanvas() {
                       points={shape.points}
                       stroke={shape.stroke}
                       strokeWidth={shape.strokeWidth}
+                      tension={shape.tension}
                       x={shape.x}
                       y={shape.y}
                     />
