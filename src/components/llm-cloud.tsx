@@ -45,7 +45,7 @@ export default function LlmCloud({ thinking }: LlmCloudProps) {
           {/* 云朵主体 */}
           <div className="relative flex items-center justify-center">
             {/* lucide Cloud 图标 */}
-            <Cloud className="size-16 text-blue-200 drop-shadow-md dark:text-blue-800/60" />
+            <Cloud className="size-24 text-blue-200 drop-shadow-md dark:text-blue-800/60" />
 
             {/* 云中文字 */}
             <span className="absolute whitespace-nowrap font-medium text-[11px] text-blue-600 dark:text-blue-300">
