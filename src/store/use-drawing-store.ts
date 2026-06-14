@@ -37,6 +37,8 @@ export interface Shape {
 
 export interface Command {
   id: string;
+  /** 执行前的 shapes 数量，用于回放时撤销 */
+  instructions: Instruction[] | null;
   shapeCount: number;
   text: string;
   timestamp: number;
@@ -107,6 +109,7 @@ interface DrawingStore {
   registerExportPng: (handler: () => void) => void;
   setCanvasSize: (w: number, h: number) => void;
   setColor: (color: string) => void;
+  setLastCommandInstructions: (instructions: Instruction[]) => void;
   setListening: (v: boolean) => void;
   setStrokeWidth: (width: number) => void;
   shapes: Shape[];
@@ -504,12 +507,22 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
         ...get().commands,
         {
           id,
+          instructions: null,
           text,
           timestamp: Date.now(),
           shapeCount: get().shapes.length,
         },
       ],
     });
+  },
+
+  setLastCommandInstructions: (instructions) => {
+    const cmds = get().commands;
+    if (cmds.length === 0) return;
+    const idx = cmds.length - 1;
+    const updated = [...cmds];
+    updated[idx] = { ...updated[idx], instructions };
+    set({ commands: updated });
   },
 
   clearCommands: () => set({ commands: [] }),

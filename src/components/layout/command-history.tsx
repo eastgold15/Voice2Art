@@ -5,10 +5,9 @@ import { useRef } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { routeCommandStream } from "@/lib/command-router";
 import { cn } from "@/lib/utils";
+import type { Command } from "@/store/use-drawing-store";
 import { useDrawingStore } from "@/store/use-drawing-store";
-import type { Instruction } from "@/types/drawing";
 
 export default function CommandHistory() {
   const commands = useDrawingStore((s) => s.commands);
@@ -22,34 +21,29 @@ export default function CommandHistory() {
     return `${hh}:${mm}:${ss}`;
   };
 
-  const handleReplay = async (text: string) => {
-    const store = useDrawingStore.getState();
-    store.addCommand(`🔁 ${text}`);
-    toast.info(`正在重新执行: "${text}"`);
+  const handleReplay = async (cmd: Command) => {
+    const instructions = cmd.instructions;
+    if (!instructions || instructions.length === 0) {
+      toast.error("该指令没有可回放记录（重新说一次吧）");
+      return;
+    }
 
-    // 缓冲所有指令，等流结束后逐条延迟执行
-    const buffer: Instruction[] = [];
+    toast.info(`🔄 正在回放: "${cmd.text}"`);
 
-    const ok = await routeCommandStream(
-      text,
-      (drawShape) => {
-        buffer.push(drawShape);
-      },
-      (setStyle) => {
-        buffer.push(setStyle);
-      },
-      (canvasControl) => {
-        buffer.push(canvasControl);
-      }
-    );
+    // 1. 撤销到执行前的状态（通过 shapeCount 找回当时的画布）
+    await new Promise((r) => setTimeout(r, 200));
+    while (useDrawingStore.getState().shapes.length > cmd.shapeCount) {
+      const state = useDrawingStore.getState();
+      if (state.historyIndex <= 0) break;
+      state.undo();
+    }
 
-    if (buffer.length > 0) {
-      for (const instruction of buffer) {
-        await new Promise((r) => setTimeout(r, 600));
-        useDrawingStore.getState().executeInstructions([instruction]);
-      }
-    } else if (!ok) {
-      toast.error(`无法重新执行指令: "${text}"`);
+    await new Promise((r) => setTimeout(r, 300));
+
+    // 2. 逐条重新执行存储的指令
+    for (const instruction of instructions) {
+      await new Promise((r) => setTimeout(r, 600));
+      useDrawingStore.getState().executeInstructions([instruction]);
     }
   };
 
@@ -99,7 +93,7 @@ export default function CommandHistory() {
                   <Button
                     aria-label="回放此指令"
                     className="mt-0.5 shrink-0 opacity-0 group-hover:opacity-100"
-                    onClick={() => handleReplay(cmd.text)}
+                    onClick={() => handleReplay(cmd)}
                     size="icon-xs"
                     variant="ghost"
                   >
