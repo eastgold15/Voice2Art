@@ -60,15 +60,15 @@ function normalizeLocation(loc: unknown, lastPos: Position | null): Position {
 
     // { relativeTo: "last", dx, dy }
     if ("relativeTo" in obj && obj.relativeTo === "last" && lastPos) {
-      return {
+      return clampPosition({
         x: lastPos.x + ((obj.dx as number) ?? 0),
         y: lastPos.y + ((obj.dy as number) ?? 0),
-      };
+      });
     }
 
     // { x, y }
     if (typeof obj.x === "number" && typeof obj.y === "number") {
-      return { x: obj.x, y: obj.y };
+      return clampPosition({ x: obj.x, y: obj.y });
     }
   }
 
@@ -99,10 +99,16 @@ interface DrawingStore {
   isListening: boolean;
   /** 上一个绘图形状的中心位置（抽象坐标），支持跨 executeInstructions 调用的相对定位 */
   lastPosition: Position | null;
+  /** lastPosition 的历史快照，与 history/shapes 同步 */
+  lastPositionHistory: (Position | null)[];
   /** 画笔颜色 */
   penColor: string;
+  /** 画笔是否落下（跨 executeInstructions 持久化） */
+  penDown: boolean;
   /** 画笔当前所在位置（抽象坐标 0-1000） */
   penPosition: Position;
+  /** 当前笔画路径点（像素坐标，跨 executeInstructions 持久化） */
+  penStrokePoints: number[] | null;
   /** 画笔粗细 */
   penWidth: number;
   redo: () => void;
@@ -444,8 +450,11 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   historyIndex: 0,
   isListening: false,
   lastPosition: null,
+  lastPositionHistory: [null],
   penColor: "#000000",
+  penDown: false,
   penPosition: { x: 500, y: 500 },
+  penStrokePoints: null,
   penWidth: 3,
   shapes: [],
   showGrid: false,
@@ -466,37 +475,60 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     }),
 
   addShape: (shape) => {
-    const newShapes = [...get().shapes, shape];
-    const newHistory = get().history.slice(0, get().historyIndex + 1);
+    const { shapes, history, historyIndex, lastPosition, lastPositionHistory } =
+      get();
+    const newShapes = [...shapes, shape];
+    const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newShapes);
+    const newLastPosHistory = lastPositionHistory.slice(0, historyIndex + 1);
+    newLastPosHistory.push(lastPosition);
     set({
       shapes: newShapes,
       history: newHistory,
       historyIndex: newHistory.length - 1,
+      lastPositionHistory: newLastPosHistory,
     });
   },
 
   clearCanvas: () => {
-    const newHistory = [...get().history.slice(0, get().historyIndex + 1), []];
+    const { history, historyIndex, lastPositionHistory } = get();
+    const newHistory = [...history.slice(0, historyIndex + 1), []];
+    const newLastPosHistory = [
+      ...lastPositionHistory.slice(0, historyIndex + 1),
+      null,
+    ];
     set({
       shapes: [],
       history: newHistory,
       historyIndex: newHistory.length - 1,
       lastPosition: null,
+      lastPositionHistory: newLastPosHistory,
+      penDown: false,
+      penStrokePoints: null,
     });
   },
 
   undo: () => {
-    if (get().historyIndex > 0) {
-      const newIndex = get().historyIndex - 1;
-      set({ shapes: get().history[newIndex], historyIndex: newIndex });
+    const { history, historyIndex, lastPositionHistory } = get();
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      set({
+        shapes: history[newIndex],
+        historyIndex: newIndex,
+        lastPosition: lastPositionHistory[newIndex],
+      });
     }
   },
 
   redo: () => {
-    if (get().historyIndex < get().history.length - 1) {
-      const newIndex = get().historyIndex + 1;
-      set({ shapes: get().history[newIndex], historyIndex: newIndex });
+    const { history, historyIndex, lastPositionHistory } = get();
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      set({
+        shapes: history[newIndex],
+        historyIndex: newIndex,
+        lastPosition: lastPositionHistory[newIndex],
+      });
     }
   },
 
@@ -547,11 +579,13 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
       lastPosition,
       penPosition,
       penColor,
+      penDown: storePenDown,
+      penStrokePoints: storePenStrokePoints,
       penWidth,
     } = get();
     let lastPos: Position | null = lastPosition;
-    let penDown = false;
-    let currentStrokePoints: number[] | null = null;
+    let penDown = storePenDown;
+    let currentStrokePoints: number[] | null = storePenStrokePoints;
     let currentPenPos = { ...penPosition };
     let currentPenColor = penColor;
     let currentPenWidth = penWidth;
@@ -590,7 +624,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
           break;
         case "pen": {
           if (ins.cmd === "move" && ins.at) {
-            currentPenPos = { x: ins.at.x, y: ins.at.y };
+            currentPenPos = clampPosition({ x: ins.at.x, y: ins.at.y });
             if (penDown && currentStrokePoints) {
               const px = abstractToPixel(ins.at.x, canvasWidth);
               const py = abstractToPixel(ins.at.y, canvasHeight);
@@ -633,6 +667,8 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
       lastPosition: lastPos,
       penPosition: currentPenPos,
       penColor: currentPenColor,
+      penDown,
+      penStrokePoints: currentStrokePoints,
       penWidth: currentPenWidth,
     });
   },

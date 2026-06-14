@@ -47,6 +47,9 @@ export function useVoice() {
         (canvasControl) => {
           buffer.push(canvasControl);
         },
+        (penInstruction) => {
+          buffer.push(penInstruction);
+        },
         // onLlmStart — LLM 开始流式调用
         () => {
           calledLlm = true;

@@ -234,8 +234,8 @@ Voice2Art/
 
 ## 演示视频
 
-<!-- TODO: 完成后在此粘贴 B站/云盘链接 -->
 
+[【七牛云 × XEngineer 暑期实训营 第四期】](https://www.bilibili.com/video/BV1TKJN6VEZH/?share_source=copy_web&vd_source=0165475704680e0396bc51d6d4855807)
 ## 许可证
 
 本项目仅用于七牛云 2026 校园招聘黑客马拉松参赛，代码仅供参考学习。
