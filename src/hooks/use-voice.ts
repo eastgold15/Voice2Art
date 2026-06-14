@@ -6,6 +6,7 @@ import { routeCommandStream } from "@/lib/command-router";
 import type { SpeechError, SpeechEvent } from "@/lib/speech-recognition";
 import { getSpeechService } from "@/lib/speech-recognition";
 import { useDrawingStore } from "@/store/use-drawing-store";
+import type { Instruction } from "@/types/drawing";
 
 export function useVoice() {
   const isListening = useDrawingStore((s) => s.isListening);
@@ -15,27 +16,36 @@ export function useVoice() {
   const [isLlmThinking, setIsLlmThinking] = useState(false);
   const _processingRef = useRef(false);
 
+  /** 逐条延迟执行：每条间隔 600ms，产生逐条画出的动画效果 */
+  const executeWithDelay = useCallback(async (instructions: Instruction[]) => {
+    for (const instruction of instructions) {
+      await new Promise((r) => setTimeout(r, 600));
+      useDrawingStore.getState().executeInstructions([instruction]);
+    }
+  }, []);
+
   // handleFinal 定义在 hook 内，闭包访问 setIsLlmThinking
-  const handleFinal = useCallback(async (text: string) => {
-    console.log("[Voice] 最终识别文本:", text);
+  const handleFinal = useCallback(
+    async (text: string) => {
+      console.log("[Voice] 最终识别文本:", text);
 
-    const store = useDrawingStore.getState();
-    store.addCommand(text);
-
-    // 创建一个 Promise 来包装 routeCommandStream，以便追踪 LLM 状态
-    const executeStream = async () => {
+      const store = useDrawingStore.getState();
+      store.addCommand(text);
       let calledLlm = false;
+
+      // 缓冲所有指令，等流结束后一起处理（支持延迟执行 + 相对定位）
+      const buffer: Instruction[] = [];
 
       const ok = await routeCommandStream(
         text,
         (drawShape) => {
-          store.executeInstructions([drawShape]);
+          buffer.push(drawShape);
         },
         (setStyle) => {
-          store.executeInstructions([setStyle]);
+          buffer.push(setStyle);
         },
         (canvasControl) => {
-          store.executeInstructions([canvasControl]);
+          buffer.push(canvasControl);
         },
         // onLlmStart — LLM 开始流式调用
         () => {
@@ -53,13 +63,15 @@ export function useVoice() {
         setIsLlmThinking(false);
       }
 
-      if (!ok) {
+      // 有缓冲指令 → 逐条延迟执行（含 set-style 等非 draw 指令）
+      if (buffer.length > 0) {
+        await executeWithDelay(buffer);
+      } else if (!ok) {
         toast.error(`无法识别指令"${text}"，请尝试说"画红色大圆"`);
       }
-    };
-
-    await executeStream();
-  }, []);
+    },
+    [executeWithDelay]
+  );
 
   useEffect(() => {
     const svc = getSpeechService();

@@ -49,7 +49,7 @@ export default function LlmCloud({ thinking }: LlmCloudProps) {
 
             {/* 云中文字 */}
             <span className="absolute whitespace-nowrap font-medium text-[11px] text-blue-600 dark:text-blue-300">
-              AI 思考中...
+              思考中...
             </span>
           </div>
         </motion.div>

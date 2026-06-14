@@ -1,4 +1,9 @@
-import type { DrawShape } from "@/types/drawing";
+import type {
+  CanvasControl,
+  DrawShape,
+  Instruction,
+  SetStyle,
+} from "@/types/drawing";
 
 /**
  * 非流式版本（保留兼容）
@@ -6,7 +11,9 @@ import type { DrawShape } from "@/types/drawing";
 export async function parseWithLLM(text: string): Promise<DrawShape[] | null> {
   const results: DrawShape[] = [];
   const ok = await parseWithLLMStream(text, (ins) => {
-    results.push(ins);
+    if (ins.action === "draw") {
+      results.push(ins);
+    }
   });
   return ok && results.length > 0 ? results : null;
 }
@@ -17,7 +24,7 @@ export async function parseWithLLM(text: string): Promise<DrawShape[] | null> {
  */
 export async function parseWithLLMStream(
   text: string,
-  onInstruction: (instruction: DrawShape) => void
+  onInstruction: (instruction: Instruction) => void
 ): Promise<boolean> {
   console.log(`[LLM Stream] 发起流式请求 | text:"${text}"`);
 
@@ -70,10 +77,23 @@ export async function parseWithLLMStream(
           console.log(`[LLM Stream] 模型拒绝: "${parsed.error}"`);
           return false;
         }
-        if (parsed.action === "draw") {
-          console.log(`[LLM Stream] 收到指令 → ${data.slice(0, 100)}`);
+
+        // 根据 action 类型分发
+        const action = parsed.action as string;
+        if (action === "draw") {
+          console.log(`[LLM Stream] 收到 draw → ${data.slice(0, 100)}`);
           onInstruction(parsed as unknown as DrawShape);
           hasResult = true;
+        } else if (action === "set-style") {
+          console.log(`[LLM Stream] 收到 set-style → ${data.slice(0, 100)}`);
+          onInstruction(parsed as unknown as SetStyle);
+          hasResult = true;
+        } else if (["clear", "undo", "redo", "toggle-grid"].includes(action)) {
+          console.log(`[LLM Stream] 收到 action → ${action}`);
+          onInstruction(parsed as unknown as CanvasControl);
+          hasResult = true;
+        } else {
+          console.warn("[LLM Stream] 未知 action:", action);
         }
       } catch {
         console.warn("[LLM Stream] 跳过非 JSON 行:", data.slice(0, 80));
