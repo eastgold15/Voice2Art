@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { routeCommandStream } from "@/lib/command-router";
 import { cn } from "@/lib/utils";
 import { useDrawingStore } from "@/store/use-drawing-store";
+import type { Instruction } from "@/types/drawing";
 
 export default function CommandHistory() {
   const commands = useDrawingStore((s) => s.commands);
@@ -23,22 +24,31 @@ export default function CommandHistory() {
 
   const handleReplay = async (text: string) => {
     const store = useDrawingStore.getState();
+    store.addCommand(`🔁 ${text}`);
     toast.info(`正在重新执行: "${text}"`);
+
+    // 缓冲所有指令，等流结束后逐条延迟执行
+    const buffer: Instruction[] = [];
 
     const ok = await routeCommandStream(
       text,
       (drawShape) => {
-        store.executeInstructions([drawShape]);
+        buffer.push(drawShape);
       },
       (setStyle) => {
-        store.executeInstructions([setStyle]);
+        buffer.push(setStyle);
       },
       (canvasControl) => {
-        store.executeInstructions([canvasControl]);
+        buffer.push(canvasControl);
       }
     );
 
-    if (!ok) {
+    if (buffer.length > 0) {
+      for (const instruction of buffer) {
+        await new Promise((r) => setTimeout(r, 600));
+        useDrawingStore.getState().executeInstructions([instruction]);
+      }
+    } else if (!ok) {
       toast.error(`无法重新执行指令: "${text}"`);
     }
   };
