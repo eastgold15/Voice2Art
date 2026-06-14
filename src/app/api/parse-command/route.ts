@@ -8,53 +8,47 @@ const openai = new OpenAI({
   baseURL: "https://api.deepseek.com",
 });
 
-const SYSTEM_PROMPT = `你是一个语音绘图指令解析器。用户用中文描述绘图操作，请逐条解析为 JSON 指令。
+const SYSTEM_PROMPT = `你是一个智能绘图助手。用户用自然语言描述绘图操作，你输出 JSON 指令。
 
-## 输出格式（JSONL — 每行一个 JSON 对象，不要外层数组）
+## 坐标系
+- 抽象坐标系 0-1000（不是像素），每个形状的 \`at\` 指定其**中心点**
+- Y 轴向下为正：上方数值小，下方数值大
+- 常见锚点：top-left(100,100) top-center(500,100) center(500,500) bottom-center(500,900) center-right(900,500)
 
-{"action":"draw","shape":"circle","color":"#EF4444","size":"large","at":"center"}
-{"action":"draw","shape":"rectangle","color":"#3B82F6","size":"medium","at":{"relativeTo":"last","dx":200,"dy":0}}
+## 尺寸与空间
+- small = 100 抽象单位，medium = 200（默认），large = 400
+- "半宽/半高"：small=50, medium=100, large=200
+- 两个形状之间的距离至少为各自的半宽/半高之和，才能不重叠
 
-## 字段说明
-- action: 固定 "draw"
-- shape: "circle"(圆) | "rectangle"(方/矩形) | "line"(线/直线) | "ellipse"(椭圆) | "triangle"(三角)
-- at: 位置，默认 "center"。可选 "top-left"|"top-center"|"top-right"|"center-left"|"center"|"center-right"|"bottom-left"|"bottom-right"|{"x":0-1000,"y":0-1000}|{"relativeTo":"last","dx":n,"dy":n}
-- to: 终点（仅 line），格式同 at
-- color: 描边色(hex)，可选
-- fill: 填充色(hex)，可选
-- size: "small"(100) | "medium"(200) | "large"(400)，默认 "medium"
-- strokeWidth: 粗细，可选
+## 输出格式
+每行一个 JSON 对象，多步指令多行输出。不要 \`\`\`，不要 markdown，不要外层数组。
 
-## 颜色
-红=#EF4444 黄=#EAB308 蓝=#3B82F6 绿=#22C55E 紫=#7C5CFC 黑=#000000 白=#FFFFFF 橙=#F97316 粉=#EC4899 青=#06B6D4 灰=#6B7280 棕=#92400E
+{"action":"draw","shape":"circle","at":{"x":500,"y":500},"size":"medium","color":"#EF4444"}
 
-## 位置
-左边=center-left 右边=center-right 上面=top-center 下面=bottom-center 左上=top-left 右上=top-right 左下=bottom-left 右下=bottom-right
+## 动作类型
+- \`draw\` — 画形状。字段：shape, at（必填，建议用{x,y}精确坐标）, size, color, fill, strokeWidth
+- \`set-style\` — 改样式。字段：style("color"|"stroke-width"|"fill"), value
+- \`clear\` — 清空画布 / \`undo\` — 撤销 / \`redo\` — 重做
+
+## 颜色映射
+红=#EF4444 橙=#F97316 黄=#EAB308 绿=#22C55E 蓝=#3B82F6 紫=#7C5CFC 粉=#EC4899 青=#06B6D4 黑=#000000 白=#FFFFFF 灰=#6B7280 棕=#92400E
 
 ## 关键规则
-- 每行一个 JSON 对象，多步指令多行输出
-- 不要用 \`\`\` 包裹，不要 markdown，不要逗号分隔，不要外层数组
-- "画个圈"="画圆" → circle / "画方"="画矩形" → rectangle
-- 不是绘图指令 → 输出一行: {"error":"无法解析"}
+1. 【必须参考当前画布】画布上已有图形会以"当前画布"形式给出，新图形不能与它们重叠
+2. 【必须计算位置】使用 \`at: {x,y}\` 精确定位，根据已有图形和自身尺寸计算合适坐标
+3. 【不重叠原则】两个图形之间的间距至少为 半宽之和（水平）或 半高之和（垂直）
+4. 如果跟绘图完全无关，输出: {"error":"无法解析"}
 
-## 示例
+位置计算示例：
+- 画布有一个 #1 圆形 中心=(500,500) 半径=100
+- 用户说"在它的右边画一个蓝色正方形"（默认 medium=200）
+- 计算：圆形右边缘=600，正方形半宽=100，正方形中心 x = 600+100+间距50 = 750
+- 所以: {"action":"draw","shape":"rectangle","at":{"x":750,"y":500},"color":"#3B82F6"}
 
-用户: "画一个红色大圆"
-输出:
-{"action":"draw","shape":"circle","color":"#EF4444","size":"large","at":"center"}
-
-用户: "画一个红色大圆然后在右边画蓝色方块"
-输出:
-{"action":"draw","shape":"circle","color":"#EF4444","size":"large","at":"center"}
-{"action":"draw","shape":"rectangle","color":"#3B82F6","size":"medium","at":{"relativeTo":"last","dx":200,"dy":0}}
-
-用户: "画一条从上到下的绿色直线"
-输出:
-{"action":"draw","shape":"line","color":"#22C55E","at":"top-center","to":"bottom-center"}
-
-用户: "你好今天天气怎么样"
-输出:
-{"error":"无法解析"}`;
+- 画布有一个 #1 矩形 中心=(500,500) 宽=200 高=200
+- 用户说"在它上面画一个红色小圆"（small=100）
+- 计算：矩形上边缘=400，小圆半高=50，小圆中心 y = 400-50-间距50 = 300
+- 所以: {"action":"draw","shape":"circle","at":{"x":500,"y":300},"size":"small","color":"#EF4444"}`;
 
 export async function POST(request: Request) {
   if (!DEEPSEEK_API_KEY) {
@@ -65,14 +59,26 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { text } = (await request.json()) as { text: string };
+    const { text, canvas } = (await request.json()) as {
+      text: string;
+      canvas?: { shapeDescriptions?: string[] };
+    };
     console.log(`[LLM API] 流式请求 | text:"${text}"`);
+
+    // 构建含画布上下文的用户消息
+    let userContent = "当前画布：\n";
+    if (canvas?.shapeDescriptions && canvas.shapeDescriptions.length > 0) {
+      userContent += canvas.shapeDescriptions.join("\n");
+    } else {
+      userContent += "（空）";
+    }
+    userContent += `\n\n用户说：${text}`;
 
     const stream = await openai.chat.completions.create({
       model: "deepseek-v4-flash",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: text },
+        { role: "user", content: userContent },
       ],
       temperature: 0.1,
       max_tokens: 1024,
