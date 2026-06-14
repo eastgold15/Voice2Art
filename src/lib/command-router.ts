@@ -1,4 +1,9 @@
-import type { CanvasControl, DrawShape, SetStyle } from "@/types/drawing";
+import type {
+  CanvasControl,
+  DrawShape,
+  Instruction,
+  SetStyle,
+} from "@/types/drawing";
 import { parseWithLLM, parseWithLLMStream } from "./llm-parser";
 import { matchCommand } from "./regex-matcher";
 
@@ -64,7 +69,17 @@ export async function routeCommandStream(
   console.log(`[Router] 正则未命中，启动 LLM 流式… | 输入:"${text}"`);
   onLlmStart?.();
   try {
-    return await parseWithLLMStream(text, onDraw);
+    return await parseWithLLMStream(text, (instruction: Instruction) => {
+      if (instruction.action === "draw") {
+        onDraw(instruction);
+      } else if (instruction.action === "set-style") {
+        onStyle?.(instruction);
+      } else if (
+        ["clear", "undo", "redo", "toggle-grid"].includes(instruction.action)
+      ) {
+        onAction?.(instruction);
+      }
+    });
   } finally {
     onLlmEnd?.();
   }

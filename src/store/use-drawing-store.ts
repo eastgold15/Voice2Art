@@ -5,6 +5,14 @@ import { create } from "zustand";
 import type { Instruction, Position } from "@/types/drawing";
 import { ANCHOR_MAP, SIZE_MAP } from "@/types/drawing";
 
+/** 将坐标原地限制在 0-1000 范围内 */
+function clampPosition(pos: Position): Position {
+  return {
+    x: Math.max(0, Math.min(1000, pos.x)),
+    y: Math.max(0, Math.min(1000, pos.y)),
+  };
+}
+
 // ===================== Shape 类型 =====================
 
 export interface Shape {
@@ -85,6 +93,8 @@ interface DrawingStore {
   history: Shape[][];
   historyIndex: number;
   isListening: boolean;
+  /** 上一个绘图形状的中心位置（抽象坐标），支持跨 executeInstructions 调用的相对定位 */
+  lastPosition: Position | null;
   redo: () => void;
   registerExportPng: (handler: () => void) => void;
   setCanvasSize: (w: number, h: number) => void;
@@ -333,6 +343,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   history: [[]],
   historyIndex: 0,
   isListening: false,
+  lastPosition: null,
   shapes: [],
   showGrid: false,
   theme: "light",
@@ -368,6 +379,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
       shapes: [],
       history: newHistory,
       historyIndex: newHistory.length - 1,
+      lastPosition: null,
     });
   },
 
@@ -416,8 +428,8 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // === executeInstructions (PR6 核心) ===
 
   executeInstructions: (instructions) => {
-    const { canvasWidth, canvasHeight } = get();
-    let lastPos: Position | null = null;
+    const { canvasWidth, canvasHeight, lastPosition } = get();
+    let lastPos: Position | null = lastPosition;
     const insCtx = { canvasWidth, canvasHeight };
 
     for (const ins of instructions) {
@@ -429,10 +441,10 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
           const s = ins.size ? SIZE_MAP[ins.size] : SIZE_MAP.medium;
           const refW = ins.width ?? s;
           const at = normalizeLocation(ins.at, lastPos);
-          lastPos = {
+          lastPos = clampPosition({
             x: at.x + Math.floor(refW / 2),
             y: at.y + 100,
-          };
+          });
           break;
         }
         case "set-style":
@@ -440,6 +452,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
           break;
         case "clear":
           get().clearCanvas();
+          lastPos = null;
           break;
         case "undo":
           get().undo();
@@ -454,5 +467,8 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
           break;
       }
     }
+
+    // 持久化 lastPos，下次 executeInstructions 调用可继续相对定位
+    set({ lastPosition: lastPos });
   },
 }));
